@@ -189,7 +189,7 @@ def get_force_lightcurve(name, targetdir = 'default',
         
     bkg_r_in, bkg_r_out: [float] -optional-
         Inner and outer radius of an annulus to estimate background noise, in 
-        pixel unit. Note that P48 pixel scale is 1.012 arcsec per pixel
+        pixel unit. Note that the pixel scale of ZTF Camera is 1.012 arcsec per pixel.
         The default values are recommended.
         
     Returns:
