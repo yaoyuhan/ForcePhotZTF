@@ -376,10 +376,7 @@ def compare_forcephot_marshal(name, targetdir, r_thre = 0.3,
     ax[1].grid(linestyle=':')
     ax[2].grid(linestyle=':')
     plt.savefig(targetdir+'/compare_lc_'+name+'_psf.pdf')
-    
-    
-    # plt.plot(yao_lc['jdobs']-2458300, yao_lc['magpsf'], '.')
-    # plt.ylim(27, 15)
+    plt.close()
     
     
     

@@ -56,18 +56,6 @@ def mylinear_fit(x, y, yerr, npar=2):
     return Fpsf, e_Fpsf, a, pearson_r
     
 
-def my_sigma_clip_with_mask(residual_fn, ok_ix, sigma = 3):
-    data = residual_fn[ok_ix]
-    filtered_data = sigma_clip(data, sigma = sigma)
-    ok_ravel = ok_ix.ravel()
-    newarray = np.linspace(0, 624, num=625, dtype=int)
-    newmask_loc = newarray[ok_ravel][filtered_data.mask]
-    sigma_mask_ravel = np.zeros(625, dtype = bool)
-    sigma_mask_ravel[newmask_loc] = True
-    sigma_mask = sigma_mask_ravel.reshape(25, 25)
-    return sigma_mask
-    
-
 class ZTFphot(object):
     
     def __init__(self, name, ra, dec, imgpath, psfpath, bad_thre):
@@ -89,32 +77,41 @@ class ZTFphot(object):
         # since physical coordinate in python starts from 0, not 1
         pixX = pixcrd[0, 0]-1 
         pixY = pixcrd[0, 1]-1
-
-        pixXint = int(np.rint(pixX))
-        pixYint = int(np.rint(pixY))
+        self.pixX = pixX
+        self.pixY = pixY
+        self.n_dty = n_dty
+        self.n_dtx = n_dtx
         
-        if pixXint<0 or pixYint<0 or pixYint>n_dty or pixXint>n_dtx:
+        # plt.imshow(dt, origin = 'power left', vmin = -10, vmax = 100)
+        # plt.plot(pixX, pixY, 'r.')
+        
+        if np.isnan(pixX)==1 or np.isnan(pixY)==1:
             self.status = False
             print ('Set status to False -- Target outside of image!')
-        elif pixXint<12 or pixYint<12 or pixYint>(n_dty-12) or pixXint>(n_dtx-12):
-            print ('Set status to False -- Target on the edge of the image!')
-            self.status = False
-        elif dt[pixYint, pixXint]<bad_thre:
-            self.status = False
-            print ('Set status to False -- Bad pixel in the center of PSF!')
+
         else:
-            self.status = True
+            pixXint = int(np.rint(pixX))
+            pixYint = int(np.rint(pixY))
+            self.pixXint = pixXint
+            self.pixYint = pixYint
+        
+            if pixXint<0 or pixYint<0 or pixYint>n_dty or pixXint>n_dtx:
+                self.status = False
+                print ('Set status to False -- Target outside of image!')
+            elif pixXint<12 or pixYint<12 or pixYint>(n_dty-12) or pixXint>(n_dtx-12):
+                print ('Set status to False -- Target on the edge of the image!')
+                self.status = False
+            elif dt[pixYint, pixXint]<bad_thre:
+                self.status = False
+                print ('Set status to False -- Bad pixel in the center of PSF!')
+            else:
+                self.status = True
         
         zp = hd['MAGZP']
         e_zp = hd['MAGZPUNC']
         obsjd = hd['OBSJD']
         flux0 = 10**(zp/2.5)
         e_flux0 = flux0  / 2.5 * np.log(10) * e_zp
-        
-        self.pixX = pixX
-        self.pixY = pixY
-        self.pixXint = pixXint
-        self.pixYint = pixYint
         self.obsjd = obsjd
         self.zp = zp
         self.e_zp = e_zp
@@ -136,6 +133,8 @@ class ZTFphot(object):
         pixXint = pobj.pixXint
         pixYint = pobj.pixYint
         bad_thre = pobj.bad_thre
+        n_dty = pobj.n_dty
+        n_dtx = pobj.n_dtx
         '''
         imgpath = self.imgpath        
         pixX = self.pixX
@@ -143,8 +142,13 @@ class ZTFphot(object):
         pixXint = self.pixXint
         pixYint = self.pixYint
         bad_thre = self.bad_thre
+        n_dty = self.n_dty
+        # n_dtx = self.n_dtx
         
-        dt = fits.open(imgpath)[1].data        
+        dt = fits.open(imgpath)[1].data  
+        if (pixYint + 14)>n_dty:
+            new_patch = np.zeros((10, dt.shape[1]))
+            dt = np.vstack([dt, new_patch])
         scr_fn_1 = dt[pixYint - 13 : pixYint + 14, 
                       pixXint - 13 : pixXint + 14]
         xoff_tobe = pixX - pixXint
@@ -223,17 +227,25 @@ class ZTFphot(object):
                        row_mask_start, row_mask_end):
         bad_mask = self.bad_mask
         scr_fn = self.scr_fn
+        gain = self.gain
+        bkgstd = self.bkgstd
         
         if manual_mask == True:     
             manual_mask = np.zeros((25, 25), dtype = bool)
             manual_mask[col_mask_start:col_mask_end, row_mask_start:row_mask_end] = True
             bad_mask[manual_mask] = True
-        self.bad_mask = bad_mask
             
+        ind = (scr_fn/gain + bkgstd**2<0)
+        if np.sum(ind)!=0:
+            print ('%d pixel removed to get positive photometric error' %np.sum(ind))
+            bad_mask[ind] = 1
+        
         scr_cor_fn = deepcopy(scr_fn)
         scr_cor_fn[bad_mask] = np.nan 
         
         self.scr_cor_fn = scr_cor_fn
+        self.bad_mask = bad_mask
+        self.nbad = np.sum(bad_mask)
     
         
     def fit_psf(self):
@@ -258,6 +270,7 @@ class ZTFphot(object):
         _psf_ravel = psf_fn[~bad_mask]
         _scr_cor_ravel = scr_cor_fn[~bad_mask]
         _yerrsq = _scr_cor_ravel / gain + bkgstd**2 
+        
         _yerr = np.sqrt(_yerrsq)
 
         # two-parameter fit

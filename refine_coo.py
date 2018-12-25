@@ -8,8 +8,10 @@ Created on Fri Dec 21 17:27:04 2018
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy import units
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
+from astropy.stats import sigma_clip
 from ztfquery import marshal
 from phot_class import ZTFphot
     
@@ -53,21 +55,21 @@ def astrometry_spread(name, raset, decset, ra, dec, ra1, dec1):
     
     plt.figure(figsize = (8, 7.5))
     for i in range(len(xs)):
-        plt.plot([0, xs[i]], [0, ys[i]], 'k-', alpha=0.1, linewidth = 2.5)
-        plt.plot(xs[i], ys[i], 'k.')
+        plt.plot([0, xs[i]], [0, ys[i]], 'k-', alpha=0.1, linewidth = 2.5, zorder=1)
+        plt.plot(xs[i], ys[i], 'k.', zorder=1)
     plt.plot(0, 0, 'k.', label = '%d obs around peak'%len(raset))
-    plt.plot(0, 0, 'r.', label='new centroid')
+    plt.plot(0, 0, 'r.', label='new centroid', zorder=2)
     plt.xlabel(r'$\Delta$'+'RA (arcsec)')
     plt.ylabel(r'$\Delta$'+'DEC (arcsec)')
     plt.title(name)
     
-    plt.plot([0,x2], [0, y2], 'm-', alpha=0.3)
-    plt.plot(x2, y2, 'm.', label='marshal')
+    plt.plot([0,x2], [0, y2], 'm-', zorder=2)
+    plt.plot(x2, y2, 'm.', label='marshal', zorder=2)
     
     phis = np.linspace(0, 2*np.pi, 1000)
     xxs = radius * np.cos(phis)
     yys = radius * np.sin(phis)
-    plt.plot(xxs, yys, 'g--', label='radius = '+repr(radius)+' arcsec')
+    plt.plot(xxs, yys, 'g--', label='radius = '+repr(radius)+' arcsec', zorder=2)
     ax = plt.gca()
     xlims = ax.get_xlim()
     ylims = ax.get_ylim()
@@ -92,6 +94,7 @@ def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
         psffiles = np.array(glob.glob(psfdir+'*.fits'))
         arg = np.argsort(psffiles)
         psffiles = psffiles[arg]
+        
         n = len(imgfiles)
         jdobs_ = np.zeros(n)
         
@@ -140,6 +143,23 @@ def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
     
         ra = np.median(raset)
         dec = np.median(decset)
+        # plt.plot(raset, decset, 'k.')
+        #  plt.plot(ra, dec, 'r.')
+        cset = SkyCoord(raset*units.deg, decset*units.deg)
+        centroid = SkyCoord(ra*units.deg, dec*units.deg)
+        
+        sep_arcsec = centroid.separation(cset).arcsec
+        clip_sep = sigma_clip(sep_arcsec)
+        while np.sum(clip_sep.mask)!=0:
+            print ('remove %d because of >3 sigma deviation from others' %np.sum(clip_sep.mask))
+            raset = raset[~clip_sep.mask]
+            decset = decset[~clip_sep.mask]
+            ra = np.median(raset)
+            dec = np.median(decset)
+            cset = SkyCoord(raset*units.deg, decset*units.deg)
+            centroid = SkyCoord(ra*units.deg, dec*units.deg)
+            sep_arcsec = centroid.separation(cset).arcsec
+            clip_sep = sigma_clip(sep_arcsec)
         
         astrometry_spread(name, raset, decset, ra, dec, ra1, dec1)
         plt.savefig(targetdir+'/astrometry.pdf')
