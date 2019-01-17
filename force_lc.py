@@ -9,15 +9,18 @@ import os
 import glob
 import numpy as np
 import pandas as pd
-from copy import deepcopy
+import matplotlib
+import matplotlib.pyplot as plt
 from astropy.io import fits
 from ztfquery import marshal, query
 from ztfquery.io import download_single_url
 from phot_class import ZTFphot
 from refine_coo import get_refined_coord, get_pos
+from astropy.table import Table
 
 
-def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd):
+def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, 
+                                    open_check = False):
     '''
     Download subtracted images and psf images from irsa
     '''
@@ -86,56 +89,55 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd):
         
     ix_why = np.in1d(original_names, downloaded_names)
     print ('%d images in %d we do not have data:' %(np.sum(~ix_why), len(urls)))
+    '''
     print (original_names[~ix_why])
     print ('saving them to missingdata.txt')
-    
     with open(targetdir+'/missingdata.txt', 'w') as f:
         for item in original_names[~ix_why]:
             f.write("%s\n" % item)
     f.close()
+    '''
     
     ###################### check if files can be opened #######################
-    print ('checking if all files can be opened...')
-    imgdir = targetdir+'/images_refdiff/'
-    psfdir = targetdir+'/images_diffpsf/'
-    imgfiles = np.array(glob.glob(imgdir+'*.fits'))
-    arg = np.argsort(imgfiles)
-    imgfiles = imgfiles[arg]
-    psffiles = np.array(glob.glob(psfdir+'*.fits'))
-    arg = np.argsort(psffiles)
-    psffiles = psffiles[arg]
-    assert len(imgfiles)==len(psffiles)
-    n = len(imgfiles)
+    if open_check == True:
+        print ('checking if all files can be opened...')
+        imgdir = targetdir+'/images_refdiff/'
+        psfdir = targetdir+'/images_diffpsf/'
+        imgfiles = np.array(glob.glob(imgdir+'*.fits'))
+        arg = np.argsort(imgfiles)
+        imgfiles = imgfiles[arg]
+        psffiles = np.array(glob.glob(psfdir+'*.fits'))
+        arg = np.argsort(psffiles)
+        psffiles = psffiles[arg]
+        assert len(imgfiles)==len(psffiles)
+        n = len(imgfiles)
         
-    for i in range(n):
-        if i%30 == 0:
-            print ('In progress: %d in %d...' %(i, n))
-        imgpath = imgfiles[i]
-        psfpath = psffiles[i]
-        try:
-            fits.open(imgpath)[1].header
-            fits.open(imgpath)[1].data
-            fits.open(psfpath)[0].data
-        except:
-            print ('file broken, remove %s, %s' %(imgpath, psffiles[i]))
-            os.remove(imgfiles[i])
-            os.remove(psffiles[i])
-    print ('\n')
+        for i in range(n):
+            if i%30 == 0:
+                print ('In progress: %d in %d...' %(i, n))
+            imgpath = imgfiles[i]
+            psfpath = psffiles[i]
+            try:
+                fits.open(imgpath)[1].header
+                fits.open(imgpath)[1].data
+                fits.open(psfpath)[0].data
+            except:
+                print ('file broken, remove %s, %s' %(imgpath, psffiles[i]))
+                os.remove(imgfiles[i])
+                os.remove(psffiles[i])
+        print ('\n')
     
 
-def get_force_lightcurve(name, targetdir = 'default',
-                         before_marshal_detection = None,
-                         detection_jd = None,
-                         plot_mod = None,
-                         bad_threshold = -500,
-                         recenter_coo = True,
-                         ndays_before_peak = 8, ndays_after_peak = 10,
-                         manual_mask = False, 
-                         col_mask_start = 0, col_mask_end = 0,                  
-                         row_mask_start = 0, row_mask_end = 0,
-                         bkg_r_in = 25, bkg_r_out = 30):
+def prepare_forced_phot(name, targetdir = 'default',
+                        before_marshal_detection = None,
+                        detection_jd = None, recenter_coo = True,
+                        ndays_before_peak = 8, ndays_after_peak = 10,
+                        open_check = False):
     '''
-    Get force psf photometry light curve for ZTF a source
+    Preparation for force psf photometry light curve for ZTF a source:
+        1) download images
+        2) re-center the coordinate 
+           (usually only small offset from the marshal, ~0.1 arcsec)
     
     Parameters:
     -----------
@@ -157,15 +159,6 @@ def get_force_lightcurve(name, targetdir = 'default',
         The julian date when this target is first detected on Marshal
         Only useful when before_marshal_detection is not None
          - `detection_jd=None`: then this function will find this jd automatically
-         
-    plot_mod: [int | None] -optional-
-        Visualization of the psf fitting every plot_mod images
-        All figures will be saved to `targetdir/figures/`
-        - `plot_mod=None`: do not visualize the fitting
-        - `plot_mod=1`: visualize every image 
-        
-    bad_thre: [int, <0] -optional-
-        Pixels with value < bad_threshold will be counted as bad pixels
         
     recenter_coo: [bool] -optional-
         Re-determine the coordinate of the target by taking the median of all
@@ -176,31 +169,18 @@ def get_force_lightcurve(name, targetdir = 'default',
     ndays_before_peak, ndays_after_peak: [int] -optional-
         see recenter_coo; Only useful when recenter_coo is True
         
-    manual_mask: [bool] -optional-
-        manually mask some pixels within the 25*25 cutout at every epoch. 
-        If true, masked region will be a square of
-        [col_mask_start:col_mask_end, row_mask_start:row_mask_end]
-        currently only support square mask.
-        Set manual_mask = True when there is bad subtraction at the same region
-        on every image (e.g., nucleus of the host galaxy)
-    
-    col_mask_start, col_mask_end, row_mask_start, row_mask_end: [int, >=0, <25] -optional-
-        see manual_mask; Only useful when manual_mask = True
-        
-    bkg_r_in, bkg_r_out: [float] -optional-
-        Inner and outer radius of an annulus to estimate background noise, in 
-        pixel unit. Note that the pixel scale of ZTF Camera is 1.012 arcsec per pixel.
-        The default values are recommended.
+    open_check: [bool] -optional-
+        If true, each file will be check to see if it can be opened after download.
+        Broken files seldom exist.
         
     Returns:
     -------
-    targetdir: string
-        the name of the directory of this target
+    None
     
     Outputs:
     --------
-    `targetdir/lightcurves`: [directory]
-        contains both marshal lightcurve and force photometry lightcurve
+    `targetdir/lightcurves/marshal_lightcurve_ZTFname.csv`: [file]
+        marshal lightcurve
         
     `targetdir/images_refdiff/`: [directory]
         contains difference images on which PSF photometry is performed
@@ -220,13 +200,11 @@ def get_force_lightcurve(name, targetdir = 'default',
     `targetdir/astrometry.pdf`: [file]
         a figure showing how far the recentered coordinate is from the marshal
         coordinate; only exist when recenter_coo == True
-        
-    `targetdir/figures/`: [directory]
-        cantains visualization of the PSF fitting process; only exist when 
-        plot_mod is not None
     '''
          
     name = str(name)
+    bad_threshold = -500 # Pixels with value < bad_threshold will be counted as bad pixels
+    
     
     ##### make a directory to store all the data relavant to this target ######
     if targetdir == 'default':
@@ -247,7 +225,10 @@ def get_force_lightcurve(name, targetdir = 'default',
         os.stat(targetdir+'lightcurves/')
     except:
         os.mkdir(targetdir+'lightcurves/')
-    marshal.download_lightcurve(name, dirout = targetdir+'lightcurves/')
+    try:
+        os.stat(targetdir+'lightcurves/marshal_lightcurve_'+name+'.csv')
+    except:
+        marshal.download_lightcurve(name, dirout = targetdir+'lightcurves/')
     
     ################ get the marshal coordinate of this target ################
     try:
@@ -263,21 +244,17 @@ def get_force_lightcurve(name, targetdir = 'default',
     if before_marshal_detection == None:
         start_jd = None
     else:
-        if detection_jd is not None:
-            start_jd = detection_jd - before_marshal_detection
-        else:
+        if detection_jd == None:
             marshal_lc = pd.read_csv(targetdir+'lightcurves/'+ \
                                      'marshal_lightcurve_'+name+'.csv')    
             detection_ix = np.where(marshal_lc['magpsf'].values!=99)[0][0]
             detection_jd = marshal_lc['jdobs'][detection_ix]
-            start_jd = detection_jd - before_marshal_detection
-    download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd)
+            
+        start_jd = detection_jd - before_marshal_detection
+    download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, open_check)
         
     ################# re-center the coordinate of the source ##################
-    if recenter_coo == False:
-        ra = deepcopy(ra1)
-        dec = deepcopy(dec1)
-    else:
+    if recenter_coo == True:
         print ('Determining the coordinate based on observations around peak...')
         marshal_lc = pd.read_csv(targetdir+'lightcurves/'+ \
                                  'marshal_lightcurve_'+name+'.csv')  
@@ -297,10 +274,61 @@ def get_force_lightcurve(name, targetdir = 'default',
             ndays_after_peak = fade_jd - peak_jd
             print ('setting ndays_after_peak to %.2f' %ndays_after_peak)
     
-        ra, dec = get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
-                                    ndays_before_peak, ndays_after_peak)
+        get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
+                          ndays_before_peak, ndays_after_peak)
         
-    ################### start getting the PSF photometry ! ####################
+        
+def get_force_lightcurve(name, targetdir, 
+                         r_psf = 3, r_bkg_in = 25, r_bkg_out = 30,
+                         plot_mod = None, manual_mask = False, 
+                         col_mask_start = 0, col_mask_end = 0,                  
+                         row_mask_start = 0, row_mask_end = 0):
+    '''
+    Parameters:
+    -----------
+    manual_mask: [bool] -optional-
+        manually mask some pixels within the 25*25 cutout at every epoch. 
+        If true, masked region will be a square of
+        [col_mask_start:col_mask_end, row_mask_start:row_mask_end]
+        currently only support square mask.
+        Set manual_mask = True when there is bad subtraction at the same region
+        on every image (e.g., nucleus of the host galaxy)
+        
+    plot_mod: [int | None] -optional-
+        Visualization of the psf fitting every plot_mod images
+        All figures will be saved to `targetdir/figures/`
+        - `plot_mod=None`: do not visualize the fitting
+        - `plot_mod=1`: visualize every image 
+    
+    col_mask_start, col_mask_end, row_mask_start, row_mask_end: [int, >=0, <25] -optional-
+        see manual_mask; Only useful when manual_mask = True
+        
+    r_bkg_in, r_bkg_out: [float] -optional-
+        Inner and outer radius of an annulus to estimate background noise, in 
+        pixel unit. Note that P48 pixel scale is 1.012 arcsec per pixel
+        The default values are recommended.
+        
+    Outputs:
+    --------
+    `targetdir/lightcurves/force_phot_ZTFname_temp.csv: [file]
+        force photometry lightcurve [before calibration]
+    
+    `targetdir/figures/`: [directory]
+        cantains visualization of the PSF fitting process; only exist when 
+        plot_mod is not None
+    '''     
+        
+    bad_threshold = -500 # Pixels with value < bad_threshold will be counted as bad pixels
+    
+    ################  read the coordinate and make figure dir #################
+    try:
+        ra, dec = np.loadtxt(targetdir+'coo.reg')
+    except:
+        try: 
+            ra, dec = np.loadtxt(targetdir+'coo_marshal.reg')
+        except:
+            print ('Error: no coordinate found!')
+            
     imgdir = targetdir+'/images_refdiff/'
     psfdir = targetdir+'/images_diffpsf/'
     
@@ -313,7 +341,7 @@ def get_force_lightcurve(name, targetdir = 'default',
         except:
             os.mkdir(targetdir+'/figures/')
     
-    # load psf and refdiff image files
+    #################### load psf and refdiff image files #####################
     imgfiles = np.array(glob.glob(imgdir+'*.fits'))
     psffiles = np.array(glob.glob(psfdir+'*.fits'))
     arg = np.argsort(imgfiles)
@@ -324,47 +352,50 @@ def get_force_lightcurve(name, targetdir = 'default',
     
     jdobs_ = np.zeros(n)
     filter_ = np.array(['']*n)
+    zp_ = np.ones(n)*(99)
+    ezp_ = np.ones(n)*(99)
+    seeing_ = np.ones(n)*(99)
+    programid_ = np.zeros(n)
+    
     Fpsf_ = np.ones(n)*(99)
     eFpsf_ = np.ones(n)*(99)
-    Fpsf_over_F0_ = np.ones(n)*(99)
-    eFpsf_over_F0_ = np.ones(n)*(99)
-    magpsf_ = np.ones(n)*(99)
-    emagpsf_ = np.ones(n)*(99)
+    Fap_ = np.ones(n)*(99)
     rvalue_ = np.zeros(n)
     nbads_ = np.zeros(n)
-    r_thresholds = np.array([0.3, 0.35, 0.4])
-    limmags_ = np.ones((n, len(r_thresholds)))*(99)
+    nbadbkgs_ = np.zeros(n)
+    chi2red_ = np.zeros(n)
     
-    # data analysis: ight curve
+    ######################## dalta analysis: ight curve ########################
     print ('\n')
-    print ('Start extracting light curve for %s...'%name)
+    print ('Start fitting porced light curve for %s...'%name)
     for i in range(n):
         if i%20==0:
             print ('In progress: %d in %d...' %(i, n))
         imgpath = imgfiles[i]
         psfpath = psffiles[i]
-        pobj = ZTFphot(name, ra, dec, imgpath, psfpath, bad_threshold)
-        if pobj.status == False:
-            continue
-        pobj.load_source_cutout() 
-        pobj.load_bkg_cutout(bkg_r_in, bkg_r_out)
-        pobj.get_scr_cor_fn(manual_mask, col_mask_start, col_mask_end,
-                            row_mask_start, row_mask_end)        
-        
-        pobj.fit_psf()
-        Fpsf_[i] = pobj.Fpsf
-        eFpsf_[i] = pobj.e_Fpsf
-        Fpsf_over_F0_[i] = pobj.Fpsf_over_flux0
-        eFpsf_over_F0_[i] = pobj.e_Fpsf_over_flux0
-        magpsf_[i] = pobj.magpsf
-        emagpsf_[i] = pobj.emagpsf
+        pobj = ZTFphot(name, ra, dec, imgpath, psfpath, bad_threshold, r_psf, 
+                       r_bkg_in, r_bkg_out)
+        zp_[i] = pobj.zp
+        ezp_[i] = pobj.e_zp
+        seeing_[i] = pobj.seeing
         jdobs_[i] = pobj.obsjd
         filter_[i] = pobj.filter
-        nbads_[i] = pobj.nbad
-        rvalue_[i] = pobj.r_value
+        programid_[i] = pobj.programid
+        if pobj.status == False:
+            continue
         
-        pobj.find_upper_limit(r_thresholds = r_thresholds)
-        limmags_[i] = pobj.limmags
+        pobj.load_source_cutout() 
+        pobj.load_bkg_cutout()
+        
+        pobj.get_scr_cor_fn(manual_mask, col_mask_start, col_mask_end,
+                            row_mask_start, row_mask_end)        
+        pobj.fit_psf()
+        Fpsf_[i] = pobj.Fpsf
+        eFpsf_[i] = pobj.eFpsf
+        rvalue_[i] = pobj.r_value
+        nbads_[i] = pobj.nbad
+        nbadbkgs_[i] = pobj.nbad_bkg
+        chi2red_[i] = pobj.chi2_red
         
         if plot_mod!=None:
             if i%plot_mod==0:
@@ -373,24 +404,37 @@ def get_force_lightcurve(name, targetdir = 'default',
                 pobj.plot_cutouts(savepath = savepath)
     print ('\n')
     
+    #plt.plot(chi2red_, '.')
+    #plt.ylim(0,20)
+    
     ####################### save the results to a file ########################
-    print ('wring light curve to database')
-    data = np.vstack([jdobs_, filter_, 
-                      Fpsf_, eFpsf_, 
-                      Fpsf_over_F0_, eFpsf_over_F0_, 
-                      magpsf_, emagpsf_, 
-                      rvalue_, limmags_.T, 
-                      nbads_]).T
-    noid = jdobs_==0
-    data = data[~noid]
-    my_lc = pd.DataFrame(data,columns=['jdobs','filter', 'Fpsf', 'e_Fpsf', 
-                                       'Fpsf/F0','e_Fpsf/F0', 
-                                       'magpsf', 'e_magpsf', 'r_value', 
-                                       'limmag_r=0.3', 'limmag_r=0.35',
-                                       'limmag_r=0.4', 'nbad'])
-    my_lc.to_csv(targetdir+'/lightcurves/force_phot_'+name+'.csv',
-                 index = False)
-   
-    return targetdir
-        
-        
+    print ('writing light curve to database')
+    data = [jdobs_, filter_, seeing_, zp_, ezp_, Fpsf_, eFpsf_, Fap_, 
+            rvalue_, nbads_, nbadbkgs_, chi2red_, programid_]
+    
+    my_lc = Table(data,names=['jdobs','filter', 'seeing', 'zp', 'ezp',
+                              'Fpsf', 'eFpsf', 'Fap', 'rvalue', 'nbad',
+                              'nbadbkg', 'chi2red', 'programid'])
+    
+    my_lc.write(targetdir+'/lightcurves/force_phot_'+name+'_temp.fits', overwrite=True)
+    
+    
+def quicklook_mylc(name, targetdir):
+    # np.sum(mylc['nbad']!=0)
+    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_'+name+'_temp.fits')[1].data) 
+    ix = mylc['rvalue']!=0
+    mylc = mylc[ix]
+    
+    ixr = mylc['filter']=='r'
+    ixg = mylc['filter']=='g'
+    
+    plt.figure(figsize=(12,6))
+    matplotlib.rcParams.update({'font.size': 15})
+    plt.errorbar(mylc['jdobs'][ixr], mylc['Fpsf'][ixr], mylc['eFpsf'][ixr], fmt='.r', alpha=0.5)
+    plt.errorbar(mylc['jdobs'][ixg], mylc['Fpsf'][ixg], mylc['eFpsf'][ixg], fmt='.g', alpha=0.5)
+    
+    ixk = mylc['seeing'] > 3.0
+    plt.errorbar(mylc['jdobs'][ixk], mylc['Fpsf'][ixk], mylc['eFpsf'][ixk], fmt='.b')
+    
+    ixk = mylc['seeing'] > 3.5
+    plt.errorbar(mylc['jdobs'][ixk], mylc['Fpsf'][ixk], mylc['eFpsf'][ixk], fmt='.k')

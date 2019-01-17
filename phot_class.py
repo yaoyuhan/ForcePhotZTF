@@ -12,7 +12,6 @@ from scipy import ndimage
 from copy import deepcopy
 from astropy import wcs
 from astropy.io import fits
-from astropy.stats import sigma_clip
 from astropy.visualization import SqrtStretch
 from astropy.visualization.mpl_normalize import ImageNormalize
 from photutils import CircularAnnulus
@@ -54,17 +53,22 @@ def mylinear_fit(x, y, yerr, npar=2):
     y_mean = np.mean(y)
     pearson_r = np.sum( (x - x_mean) * (y - y_mean) ) / np.sqrt(np.sum( (x - x_mean)**2 )) / np.sqrt(np.sum( (y - y_mean)**2 ))
     return Fpsf, e_Fpsf, a, pearson_r
-    
+
 
 class ZTFphot(object):
     
-    def __init__(self, name, ra, dec, imgpath, psfpath, bad_thre):
+    def __init__(self, name, ra, dec, imgpath, psfpath, bad_threshold=-500, 
+                 r_psf=3, r_bkg_in=10, r_bkg_out=15):
         self.name = name
         self.ra = ra
         self.dec = dec
         self.imgpath = imgpath
         self.psfpath = psfpath  
-        self.bad_thre = bad_thre
+        self.r_psf = r_psf
+        self.r_bkg_in = r_bkg_in
+        self.r_bkg_out = r_bkg_out
+        self.bad_threshold = bad_threshold
+        self.length = 2*r_psf + 1
     
         hd = fits.open(imgpath)[1].header
         dt = fits.open(imgpath)[1].data
@@ -77,6 +81,7 @@ class ZTFphot(object):
         # since physical coordinate in python starts from 0, not 1
         pixX = pixcrd[0, 0]-1 
         pixY = pixcrd[0, 1]-1
+        
         self.pixX = pixX
         self.pixY = pixY
         self.n_dty = n_dty
@@ -94,34 +99,32 @@ class ZTFphot(object):
             pixYint = int(np.rint(pixY))
             self.pixXint = pixXint
             self.pixYint = pixYint
+            
+            # require no bad pixels in the central 3*3 small cutout
+            small_cutout = dt[pixYint-1: pixYint+2, pixXint-1: pixXint+2]
         
             if pixXint<0 or pixYint<0 or pixYint>n_dty or pixXint>n_dtx:
                 self.status = False
                 print ('Set status to False -- Target outside of image!')
-            elif pixXint<12 or pixYint<12 or pixYint>(n_dty-12) or pixXint>(n_dtx-12):
+            elif pixXint < r_psf or pixYint < r_psf or pixYint >= (n_dty - r_psf) or pixXint >= (n_dtx - r_psf):
                 print ('Set status to False -- Target on the edge of the image!')
                 self.status = False
-            elif dt[pixYint, pixXint]<bad_thre:
+            elif np.sum(small_cutout < bad_threshold) != 0:
                 self.status = False
-                print ('Set status to False -- Bad pixel in the center of PSF!')
+                print ('Set status to False -- Bad pixel in the central 3x3 cutout!')
             else:
                 self.status = True
         
-        zp = hd['MAGZP']
-        e_zp = hd['MAGZPUNC']
-        obsjd = hd['OBSJD']
-        flux0 = 10**(zp/2.5)
-        e_flux0 = flux0  / 2.5 * np.log(10) * e_zp
-        self.obsjd = obsjd
-        self.zp = zp
-        self.e_zp = e_zp
-        self.flux0 = flux0
-        self.e_flux0 = e_flux0
+        self.obsjd = hd['OBSJD']
+        self.zp = hd['MAGZP']
+        self.e_zp = hd['MAGZPUNC']
         self.filter = hd['FILTER'][4]
         self.gain = hd['GAIN']
+        self.seeing = hd['SEEING']
+        self.programid = hd['PROGRMID']
             
         # load psf cutout
-        psf_fn = fits.open(psfpath)[0].data 
+        psf_fn = fits.open(psfpath)[0].data[12-r_psf:12+r_psf+1, 12-r_psf:12+r_psf+1]
         self.psf_fn = psf_fn  
         
         
@@ -132,32 +135,37 @@ class ZTFphot(object):
         pixY = pobj.pixY        
         pixXint = pobj.pixXint
         pixYint = pobj.pixYint
-        bad_thre = pobj.bad_thre
+        bad_threshold = pobj.bad_threshold
         n_dty = pobj.n_dty
         n_dtx = pobj.n_dtx
+        r_psf = pobj.r_psf
+        length = pobj.length
         '''
         imgpath = self.imgpath        
         pixX = self.pixX
         pixY = self.pixY        
         pixXint = self.pixXint
         pixYint = self.pixYint
-        bad_thre = self.bad_thre
+        bad_threshold = self.bad_threshold
         n_dty = self.n_dty
+        r_psf = self.r_psf
+        length = self.length
         # n_dtx = self.n_dtx
         
         dt = fits.open(imgpath)[1].data  
-        if (pixYint + 14)>n_dty:
+        if (pixYint + r_psf + 2) > n_dty:
             new_patch = np.zeros((10, dt.shape[1]))
             dt = np.vstack([dt, new_patch])
-        scr_fn_1 = dt[pixYint - 13 : pixYint + 14, 
-                      pixXint - 13 : pixXint + 14]
+        
+        scr_fn_1 = dt[pixYint - r_psf - 1 : pixYint + r_psf + 2, 
+                      pixXint - r_psf - 1 : pixXint + r_psf + 2]
         xoff_tobe = pixX - pixXint
         yoff_tobe = pixY - pixYint
         scr_fn_ = ndimage.shift(scr_fn_1, [-yoff_tobe, -xoff_tobe], order=3, 
                                 mode='reflect', cval=0.0, prefilter=True)
         scr_fn = scr_fn_[1:-1, 1:-1]      
         
-        bad_mask = scr_fn <= bad_thre
+        bad_mask = scr_fn <= bad_threshold
         nbad = np.sum(bad_mask)
         scr_fn[bad_mask] = np.nan
         self.bad_mask = bad_mask
@@ -165,7 +173,7 @@ class ZTFphot(object):
         self.scr_fn = scr_fn
         
         if nbad!=0:
-            print ('%d bad pixels in 25*25 source frame' %nbad)
+            print ('%d bad pixels in %d*%d source frame' %(nbad, length, length))
         
         
     def find_optimal_coo(self):
@@ -188,26 +196,31 @@ class ZTFphot(object):
         self.dec_cor = dec_cor
         
         
-    def load_bkg_cutout(self, bkg_r_in, bkg_r_out):
+    def load_bkg_cutout(self):
         '''
         imgpath = pobj.imgpath
         pixX = pobj.pixX
         pixY = pobj.pixY  
-        bad_thre = pobj.bad_thre
+        bad_threshold = pobj.bad_threshold
+        r_bkg_in = pobj.r_bkg_in
+        r_bkg_out = pobj.r_bkg_out
         '''
         imgpath = self.imgpath              
         pixX = self.pixX
         pixY = self.pixY
-        bad_thre = self.bad_thre
+        bad_threshold = self.bad_threshold
+        r_bkg_in = self.r_bkg_in
+        r_bkg_out = self.r_bkg_out
         
         dt = fits.open(imgpath)[1].data        
         positions = [(pixX, pixY)]
-        annulus = CircularAnnulus(positions, r_in = bkg_r_in, r_out = bkg_r_out)
-        annulus_masks = annulus.to_mask(method='center')
+        annulus_aperture = CircularAnnulus(positions, 
+                                           r_in = r_bkg_in, r_out = r_bkg_out)
+        annulus_masks = annulus_aperture.to_mask(method='center')
         annulus_data = annulus_masks[0].multiply(dt)
         
         bkg_fn = deepcopy(annulus_data)
-        bad_bkg_mask = annulus_data <= bad_thre
+        bad_bkg_mask = annulus_data <= bad_threshold
         bkg_fn[bad_bkg_mask] = np.nan
         nbad_bkg = np.sum(bad_bkg_mask)
             
@@ -216,7 +229,6 @@ class ZTFphot(object):
         
         setnan = annulus_masks[0].data==0
         bkg_fn[setnan] = np.nan
-        
         bkgstd = np.nanstd(bkg_fn) 
         
         self.bkgstd = bkgstd
@@ -225,13 +237,22 @@ class ZTFphot(object):
         
     def get_scr_cor_fn(self, manual_mask, col_mask_start, col_mask_end,
                        row_mask_start, row_mask_end):
+        '''
+        psf_fn = pobj.psf_fn
+        bad_mask = pobj.bad_mask
+        scr_fn = pobj.scr_fn
+        psf_fn = pobj.psf_fn
+        gain = pobj.gain
+        bkgstd = pobj.bkgstd
+        '''
         bad_mask = self.bad_mask
         scr_fn = self.scr_fn
         gain = self.gain
         bkgstd = self.bkgstd
+        r_psf = self.r_psf
         
         if manual_mask == True:     
-            manual_mask = np.zeros((25, 25), dtype = bool)
+            manual_mask = np.zeros((2*r_psf+1, 2*r_psf+1), dtype = bool)
             manual_mask[col_mask_start:col_mask_end, row_mask_start:row_mask_end] = True
             bad_mask[manual_mask] = True
             
@@ -254,146 +275,90 @@ class ZTFphot(object):
         scr_cor_fn = pobj.scr_cor_fn
         bad_mask = pobj.bad_mask
         bkgstd = pobj.bkgstd
-        zp = pobj.zp
-        e_zp = pobj.e_zp
         gain  = pobj.gain
+        length = pobj.length
         '''
         psf_fn = self.psf_fn  
         scr_cor_fn = self.scr_cor_fn            
         bad_mask = self.bad_mask
         bkgstd = self.bkgstd
-        flux0 = self.flux0
-        e_flux0 = self.e_flux0
         gain = self.gain
-                
-        psf_ravel = psf_fn.ravel()
+        length = self.length
+        
         _psf_ravel = psf_fn[~bad_mask]
         _scr_cor_ravel = scr_cor_fn[~bad_mask]
         _yerrsq = _scr_cor_ravel / gain + bkgstd**2 
         
         _yerr = np.sqrt(_yerrsq)
 
-        # two-parameter fit
-        Fpsf, e_Fpsf, apsf, pearson_r = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar=2)
-    
-        model_ravel = psf_ravel * Fpsf + apsf
-        model_fn = np.reshape(model_ravel, (25,25))
-        model_fn[bad_mask] = np.nan
-        _model_ravel = model_fn[~bad_mask]
+        # one-parameter fit
+        Fpsf, eFpsf, apsf, pearson_r = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar=1)
+        # calculate chi
+        resi = _psf_ravel*Fpsf - _scr_cor_ravel
+        res_over_error = resi/_yerr
+        # plt.plot(resi, 'r')
+        # plt.plot(_yerr, 'k') 
+        chi2 = np.sum(res_over_error**2)
+        chi2_red = chi2 / (length**2-1)
         
-        Fpsf_over_flux0 = Fpsf/flux0
-        e_Fpsf_over_flux0 = np.sqrt((e_Fpsf/ flux0)**2 + (Fpsf/flux0**2 * e_flux0)**2)
-    
-        magpsf = 99
-        emagpsf = 99
-        if Fpsf > 0:
-            magpsf = round(-2.5*np.log10(Fpsf/flux0), 5)
-            emagpsf = round(2.5 / np.log(10) * e_Fpsf_over_flux0 / Fpsf_over_flux0, 5)
-                            
         self._psf_ravel = _psf_ravel
         self._scr_cor_ravel = _scr_cor_ravel
         self.Fpsf = Fpsf
-        self.e_Fpsf = e_Fpsf
+        self.eFpsf = eFpsf
         self.apsf = apsf
-        self.model_fn = model_fn
-        self._model_ravel = _model_ravel
         self.r_value = round(pearson_r, 3)   
-        self.magpsf = magpsf
-        self.emagpsf = emagpsf
-        self.Fpsf_over_flux0 = Fpsf_over_flux0
-        self.e_Fpsf_over_flux0 = e_Fpsf_over_flux0
-            
+        self.Fap = np.sum(_scr_cor_ravel)/np.sum(_psf_ravel)
+        self.chi2_red = chi2_red
+        self.yerrs = _yerr        
         
-    def _find_upper_lim_individual(self, r_thre):
+    def plot_cutouts(self, savepath=None):
         '''
-        zp = pobj.zp
-        _psf_ravel = pobj._psf_ravel
-        _model_ravel = pobj._model_ravel
+        scr_fn = pobj.scr_fn
         _scr_cor_ravel = pobj._scr_cor_ravel
+        scr_cor_fn = pobj.scr_cor_fn
+        psf_fn = pobj.psf_fn
+        Fpsf = pobj.Fpsf
+        eFpsf = pobj.eFpsf
+        bad_mask = pobj.bad_mask
+        filtername = pobj.filter
+        bkg_fn = pobj.bkg_fn
+        seeing = pobj.seeing
+        length = pobj.length
+        yerrs = pobj.yerrs
         '''
-        zp = self.zp
-        _psf_ravel = self._psf_ravel
-        _model_ravel = self._model_ravel
-        _scr_cor_ravel = self._scr_cor_ravel
-        _noise_ravel = _scr_cor_ravel - _model_ravel
-        num =  len(_psf_ravel)
+        cmap_name = 'viridis'
         
-        m = 16
-        m_step = 1
-        absr = 1
-        while absr > r_thre:
-            if m==21:
-                # print ("limmag investigation break at m=21")
-                break   
-            m += m_step
-            flux = 10**(0.4*(zp - m))
-            _sigmal_ravel = _psf_ravel * flux    
-            _obs_ravel = _sigmal_ravel + _noise_ravel
-            b, eb, a, r_value = mylinear_fit(_psf_ravel, _obs_ravel, np.ones(num), npar=2)
-            absr = r_value      
-
-        if m==21 and absr > r_thre:
-            return m
-        
-        else:
-            m -= 1.1
-            m_step = 0.1
-            absr = 1
-            while absr > r_thre:
-                m += m_step
-                flux = 10**(0.4*(zp - m))
-                _sigmal_ravel = _psf_ravel * flux    
-                _obs_ravel = _sigmal_ravel + _noise_ravel
-                b, eb, a, r_value = mylinear_fit(_psf_ravel, _obs_ravel, np.ones(num), npar=2)
-                absr = r_value      
-          
-            m -= 0.11
-            m_step = 0.01
-            absr = 1
-            while absr > r_thre:
-                m += m_step
-                flux = 10**(0.4*(zp - m))
-                _sigmal_ravel = _psf_ravel * flux    
-                _obs_ravel = _sigmal_ravel + _noise_ravel
-                b, eb, a, r_value = mylinear_fit(_psf_ravel, _obs_ravel, np.ones(num), npar=2)
-                absr = r_value 
-            
-            limmag = m - 0.01
-            return limmag
-        
-        
-    def find_upper_limit(self, r_thresholds):
-        limmags = np.ones(len(r_thresholds))
-        for i in range(len(r_thresholds)):
-            r_thre = r_thresholds[i]
-            limmags[i] = self._find_upper_lim_individual(r_thre)
-        self.limmags = limmags
-    
-    
-    def plot_cutouts(self, savepath=None, cmap_name = 'viridis'):
         scr_fn = self.scr_fn
         _scr_cor_ravel = self._scr_cor_ravel
         scr_cor_fn = self.scr_cor_fn
-        model_fn = self.model_fn
-        _model_ravel = self._model_ravel
-        e_flux = self.e_Fpsf
+        psf_fn= self.psf_fn
+        Fpsf = self.Fpsf
+        eFpsf = self.eFpsf
         bad_mask = self.bad_mask
-        flux = self.Fpsf
         filtername = self.filter
+        bkg_fn = self.bkg_fn
+        seeing = self.seeing
+        length = self.length
+        yerrs = self.yerrs
         
-        fig, ax = plt.subplots(3, 4, figsize=(14, 10.5))
+        model_fn = psf_fn*Fpsf
+        _model_ravel = model_fn.ravel()
+    
+        fig, ax = plt.subplots(3, 5, figsize=(15, 9.5))
         matplotlib.rcParams.update({'font.size': 15})
         norm = ImageNormalize(stretch=SqrtStretch())
         if np.sum(bad_mask) != 0:
             ax[0,0].imshow(scr_fn, cmap = cmap_name, origin='lower', norm=norm)
-            ax[0,0].set_title('Unmasked: '+filtername, fontsize=15)
+            ax[0,0].set_title('Unmasked, '+filtername, fontsize=15)
         else:
             ax[0,0].set_axis_off()
         norm2 = ImageNormalize(stretch=SqrtStretch())
         ax[0,1].imshow(scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
         ax[0,2].imshow(model_fn, cmap = cmap_name, origin='lower', norm=norm2)
-        ax[0,1].set_title('Data', fontsize=15)
+        ax[0,1].set_title('Data, '+filtername, fontsize=15)
         ax[0,2].set_title('PSF model', fontsize=15)
+        ax[0,4].imshow(bkg_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,4].set_title('background', fontsize=15)
         
         norm1 = ImageNormalize(stretch=SqrtStretch())
         ax[0,3].imshow(scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
@@ -403,22 +368,25 @@ class ZTFphot(object):
         ax4 = plt.subplot2grid((9, 1), (3, 0), rowspan=4)
         ax4.plot(_scr_cor_ravel, 'r--', label='obs')
         ax4.plot(_model_ravel, 'b--', label='fitted')
-        ax4.set_xlim(0-5, 625+5)
+        ax4.set_xlim(0-1, length**2+1)
         ax4.legend(loc='upper right')
         ylims = ax4.get_ylim()
         ax4.set_xticklabels([])
-        yloc = ylims[0] + (ylims[1] - ylims[0])*0.7
-        plt.text(0 ,yloc, 'flux = %.1f, e_flux = %.1f'%(flux, e_flux))
+        yloc1 = ylims[0] + (ylims[1] - ylims[0])*0.7
+        plt.text(0 ,yloc1, 'flux = %.1f, e_flux = %.1f'%(Fpsf, eFpsf))
+        yloc2 = ylims[0] + (ylims[1] - ylims[0])*0.6
+        plt.text(0 ,yloc2, 'seeing = %.3f'%seeing)
         
         ax5 = plt.subplot2grid((9, 1), (7, 0), rowspan=2)
-        ax5.plot(_scr_cor_ravel - _model_ravel, '.k', label='obs - fitted')
-        ax5.set_xlim(0-5, 625+5)
+        ax5.plot(_scr_cor_ravel - _model_ravel, '.k', label='obs - fitted', zorder=2)
+        ax5.plot(yerrs, '.-r', label='uncertianties', zorder=1)
+        ax5.set_xlim(0-1, length**2+1)
         ax5.legend(loc='upper right')
         ylims = ax5.get_ylim()
         ymaxabs = max(abs(ylims[0]), abs(ylims[1]))
         ax5.set_ylim(-1*ymaxabs, ymaxabs)
-        plt.plot([0, 625], [0,0], color='grey', linewidth = 2, alpha= 0.5)
-    
+        plt.plot([0, length**2], [0,0], color='grey', linewidth = 2, alpha= 0.5)
+        
         if savepath is not None:
             plt.savefig(savepath)
             plt.close()

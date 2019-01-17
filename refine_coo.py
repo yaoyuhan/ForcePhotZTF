@@ -8,7 +8,6 @@ Created on Fri Dec 21 17:27:04 2018
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
-from astropy import units
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.stats import sigma_clip
@@ -81,7 +80,7 @@ def astrometry_spread(name, raset, decset, ra, dec, ra1, dec1):
      
     
     
-def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
+def get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
                       ndays_before_peak, ndays_after_peak):
     try:
         ra,dec = np.loadtxt(targetdir+'/coo.reg')
@@ -94,12 +93,11 @@ def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
         psffiles = np.array(glob.glob(psfdir+'*.fits'))
         arg = np.argsort(psffiles)
         psffiles = psffiles[arg]
-        
         n = len(imgfiles)
         jdobs_ = np.zeros(n)
         
         for i in range(n):
-            if i%50 == 0:
+            if i%100 == 0:
                 print ('Reading: %d in %d...' %(i, n))
             imgpath = imgfiles[i]
             hd = fits.open(imgpath)[1].header
@@ -118,12 +116,13 @@ def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
         raset = []
         decset = []
         nbadset = []
+        seeings = []
         for i in range(len(imgfiles)):
             if i%10==0:
                 print ('re-center: %d in %d' %(i, len(imgfiles)))
             imgpath = imgfiles[i]
             psfpath = psffiles[i]
-            pobj = ZTFphot(name, ra1, dec1, imgpath, psfpath, bad_thre)
+            pobj = ZTFphot(name, ra1, dec1, imgpath, psfpath, bad_threshold)
             if pobj.status == False:
                 continue
             pobj.load_source_cutout()
@@ -131,38 +130,35 @@ def get_refined_coord(name, ra1, dec1, bad_thre, targetdir, peak_jd,
             raset.append(pobj.ra_cor)
             decset.append(pobj.dec_cor)
             nbadset.append(pobj.nbad)
+            seeings.append(pobj.seeing)
             
         raset = np.array(raset)
         decset = np.array(decset)   
         nbadset = np.array(nbadset)
+        seeings = np.array(seeings)
         
         ix = nbadset == 0
         print ('remove %d images with bad pixels' %np.sum(~ix))
         raset = raset[ix]
         decset = decset[ix]
+        
+        ix = seeings <= 3
+        print ('remove %d images with seeing > 3 arcsec' %np.sum(~ix))
+        raset = raset[ix]
+        decset = decset[ix]
     
+        mask_ra = sigma_clip(raset, sigma = 3).mask
+        mask_dec = sigma_clip(decset, sigma = 3).mask
+        mask = np.any([mask_ra, mask_dec], axis=0)
+        print ('remove %d images with 3-sigma clipping' %np.sum(mask))
+        
+        raset = raset[~mask]
+        decset = decset[~mask]
+        
         ra = np.median(raset)
         dec = np.median(decset)
-        # plt.plot(raset, decset, 'k.')
-        #  plt.plot(ra, dec, 'r.')
-        cset = SkyCoord(raset*units.deg, decset*units.deg)
-        centroid = SkyCoord(ra*units.deg, dec*units.deg)
-        
-        sep_arcsec = centroid.separation(cset).arcsec
-        clip_sep = sigma_clip(sep_arcsec)
-        while np.sum(clip_sep.mask)!=0:
-            print ('remove %d because of >3 sigma deviation from others' %np.sum(clip_sep.mask))
-            raset = raset[~clip_sep.mask]
-            decset = decset[~clip_sep.mask]
-            ra = np.median(raset)
-            dec = np.median(decset)
-            cset = SkyCoord(raset*units.deg, decset*units.deg)
-            centroid = SkyCoord(ra*units.deg, dec*units.deg)
-            sep_arcsec = centroid.separation(cset).arcsec
-            clip_sep = sigma_clip(sep_arcsec)
         
         astrometry_spread(name, raset, decset, ra, dec, ra1, dec1)
         plt.savefig(targetdir+'/astrometry.pdf')
         plt.close()
         np.savetxt(targetdir+'/coo.reg', [ra,dec])
-    return ra, dec
