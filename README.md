@@ -14,6 +14,12 @@ Still under developmemt. Suggestions are welcomed!
 - photutils=0.5
 - image_registration=0.2.4
 
-### reference.py 
+## Scripts not relavant to forced-PSF photometry, but might be useful:
+#### reference.py 
 
-is not relavant to forced-PSF photometry, but just a demo of how to download marshal lightcurves without using ztfquery, and get reference image epochs from Kowalski or IPAC. Reference image epochs are important since you may want to make sure that no supernova light is in the reference images.
+This is a demo of how to download marshal lightcurves without using ztfquery, and get reference image epochs from Kowalski or IPAC. Reference image epochs are important since you may want to make sure that no supernova light is in the reference images.
+
+#### snid_run.py
+
+This is a demo of how to automatically run SNID on Caltech computer pharos (and thus written in python 2). 
+Please see here https://people.lam.fr/blondin.stephane/software/snid/howto.html for other options.
