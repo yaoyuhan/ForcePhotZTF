@@ -14,6 +14,9 @@ Still under developmemt. Suggestions are welcomed!
 - photutils=0.5
 - image_registration=0.2.4
 
+## Provide your username and password before using this package:
+ForcePhotZTF performs multiple tasks including downloading images from IPAC, getting ZTF light curves from the GROWTH Marshal website (Kasliwal et al. 2019), getting alert package from Kowalski (optional), etc. Thus you need to provide your username and password (save them to a file) in the format of 'username:password\n'.
+
 ## Scripts not relavant to forced-PSF photometry, but might be useful:
 #### reference.py 
 
