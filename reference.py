@@ -19,9 +19,11 @@ from astropy.time import Time
 from astropy.table import Table
 
 name = 'ZTF18abcdefg'
-DEFAULT_AUTH_marshal = ('', '')
-DEFAULT_AUTH_kowalski = ('', '')
-DEFAULT_AUTH_ipac = ('', '')
+from ForcePhotZTF.keypairs import get_keypairs
+DEFAULT_AUTHs = get_keypairs()
+DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
+DEFAULT_AUTH_kowalski = DEFAULT_AUTHs[1]
+DEFAULT_AUTH_ipac = DEFAULT_AUTHs[2]
 
 
 def download_marshal_lightcurve(name, DEFAULT_AUTH_marshal):
@@ -167,8 +169,8 @@ def query_ipac(name):
     
     # Step 3. get reference epoch for every row in the file `irsafile.csv`
     s = requests.Session()
-    r1 = s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
-                data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
+    s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
+            data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
     
     mylc = Table([final_out['field'].values, final_out['ccdid'].values, final_out['fid'].values,
                   final_out['qid'].values, final_out['obsjd'].values], 
@@ -227,16 +229,3 @@ def query_ipac(name):
     mylc['jdref_start'] = jdref_start
     mylc['jdref_end'] = jdref_end
     mylc.write(targetdir+'lightcurves/'+'/ipac_info_'+name+'.csv')
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    

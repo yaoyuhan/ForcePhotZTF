@@ -4,6 +4,8 @@
 Created on Thu Feb 14 07:55:58 2019
 
 @author: yuhanyao
+
+update 20190222: use the template under directory sedmdrp, which is most up to date!
 """
 import os
 import glob, shutil, subprocess
@@ -40,7 +42,7 @@ for i in range(len(ztfnames)):
             ind[j] = False
     fps = fps[ind]
     if len(fps)==0:
-        1+1
+        pass
     else:
         print name
         print z_adopt[i]
@@ -48,7 +50,7 @@ for i in range(len(ztfnames)):
             specfile = specdir+name+'/'+x.split('/')[-1]
             shutil.copyfile(x, specdir+name+'/'+x.split('/')[-1])
             if z_adopt[i]==-999:
-                subprocess.call('/scr2/nblago/software/snid-5.0/snid verbose=0 plot=0 fluxout=5 '+specfile, shell=True)
+                subprocess.call('/scr2/sedmdrp/software/snid-5.0/snid verbose=0 plot=0 fluxout=5 '+specfile, shell=True)
             else:
                 #zarg = 'forcez=%.6f'%z_adopt[i]
-                subprocess.call('/scr2/nblago/software/snid-5.0/snid forcez=%.6f verbose=0 plot=0 fluxout=5 '%z_adopt[i] + specfile, shell=True)
+                subprocess.call('/scr2/sedmdrp/software/snid-5.0/snid forcez=%.6f verbose=0 plot=0 fluxout=5 '%z_adopt[i] + specfile, shell=True)
