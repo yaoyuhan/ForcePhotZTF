@@ -2,8 +2,6 @@
 This is written for getting the light curves of ZTF transients by force photometry.
 Please see demo.ipynb for how to use this package and the pdf file for the methodology.
 
-Still under developmemt. Suggestions are welcomed!
-
 ## Python versions and package dependencies:
 - python 3.6
 - numpy==1.15.1
@@ -15,7 +13,13 @@ Still under developmemt. Suggestions are welcomed!
 - image_registration=0.2.4
 
 ## Provide your username and password before using this package:
-ForcePhotZTF performs multiple tasks including downloading images from IPAC, getting ZTF light curves from the GROWTH Marshal website (Kasliwal et al. 2019), getting alert package from Kowalski (optional), etc. Thus you need to provide your username and password (save them to a file) in the format of 'username:password\n'.
+ForcePhotZTF performs multiple tasks including:
+- downloading images from IPAC
+- getting ZTF light curves from the GROWTH Marshal website (Kasliwal et al. 2019)
+- getting alert package info from Kowalski (optional)
+- running forced photometry on Caltech forced phometry service (fps, Masci et al. 2019), kindly provided by Frank Masci at IPAC. I've compared his result and my ForcePhotZTF result -- they are very consistent with each other. The only difference may be the size of cutout and the assumption in gain factor. Thus, this step is optional. I only want some column information given in the header of sci images, which can also be obtained from fps. 
+
+You need to provide your username and password (save them to a file) in the format of 'username:password\n'.
 
 ## Scripts not relavant to forced-PSF photometry, but might be useful:
 #### reference.py 
