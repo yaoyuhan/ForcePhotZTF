@@ -12,7 +12,7 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.stats import sigma_clip
 from ztfquery import marshal
-from phot_class import ZTFphot
+from ForcePhotZTF.phot_class import ZTFphot
     
 
 def get_pos(name):
@@ -126,6 +126,8 @@ def get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
             if pobj.status == False:
                 continue
             pobj.load_source_cutout()
+            if pobj.status == False:
+                continue
             pobj.find_optimal_coo()
             raset.append(pobj.ra_cor)
             decset.append(pobj.dec_cor)
@@ -141,6 +143,7 @@ def get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
         print ('remove %d images with bad pixels' %np.sum(~ix))
         raset = raset[ix]
         decset = decset[ix]
+        seeings = seeings[ix]
         
         ix = seeings <= 3
         print ('remove %d images with seeing > 3 arcsec' %np.sum(~ix))

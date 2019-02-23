@@ -7,16 +7,25 @@ Created on Fri Dec 21 14:45:08 2018
 """
 import os
 import glob
+import requests
 import numpy as np
 import pandas as pd
-import matplotlib
+
 import matplotlib.pyplot as plt
+
 from astropy.io import fits
-from ztfquery import marshal, query
-from ztfquery.io import download_single_url
-from phot_class import ZTFphot
-from refine_coo import get_refined_coord, get_pos
+import astropy.io.ascii as asci
 from astropy.table import Table
+
+from ztfquery import query
+from ztfquery.io import download_single_url
+
+from ForcePhotZTF.keypairs import get_keypairs
+from ForcePhotZTF.phot_class import ZTFphot
+from ForcePhotZTF.refine_coo import get_refined_coord, get_pos
+
+DEFAULT_AUTHs = get_keypairs()
+DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
 
 
 def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, 
@@ -35,14 +44,14 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
     except:
         os.mkdir(subdir2) 
         
-    ############## Get metadata of all images at this location ################
+    ############## Get metadata ocf all images at this location ################
     zquery = query.ZTFQuery()
     print ('\n')
     print("Querying for metadata...")
     if start_jd == None:
-        zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.01)
+        zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.003)
     else:
-        zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.01,
+        zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.003,
                              sql_query='obsjd>'+repr(start_jd))
     out = zquery.metatable
     final_out = out.sort_values(by=['obsjd'])
@@ -54,7 +63,7 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
     print ('Trying to download %d images from irsa...' %len(urls)) 
     
     for i in range(len(urls)):
-        if i%30 == 0:
+        if i%50 == 0:
             print ('In progress: %d in %d' %(i,len(urls) ))
         _url = urls[i]
         _url_diffpsf = _url.split('sciimg')[0]+'diffimgpsf.fits'
@@ -89,15 +98,8 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
         
     ix_why = np.in1d(original_names, downloaded_names)
     print ('%d images in %d we do not have data:' %(np.sum(~ix_why), len(urls)))
-    '''
-    print (original_names[~ix_why])
-    print ('saving them to missingdata.txt')
-    with open(targetdir+'/missingdata.txt', 'w') as f:
-        for item in original_names[~ix_why]:
-            f.write("%s\n" % item)
-    f.close()
-    '''
-    
+    print ('\n')
+
     ###################### check if files can be opened #######################
     if open_check == True:
         print ('checking if all files can be opened...')
@@ -109,11 +111,33 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
         psffiles = np.array(glob.glob(psfdir+'*.fits'))
         arg = np.argsort(psffiles)
         psffiles = psffiles[arg]
-        assert len(imgfiles)==len(psffiles)
         n = len(imgfiles)
         
+        if len(imgfiles)!=len(psffiles):
+            imgstrings = [x.split('/')[-1][:-20] for x in imgfiles]
+            psfstrings = [x.split('/')[-1][:-16] for x in psffiles]
+            imgstrings = np.array(imgstrings)
+            psfstrings = np.array(psfstrings)
+            if len(imgstrings) > len(psfstrings):
+                ix = np.in1d(imgstrings, psfstrings)
+                for x in imgfiles[~ix]:
+                    os.remove(x)
+            else:
+                ix = np.in1d(psfstrings, imgstrings)
+                for x in psffiles[~ix]:
+                    os.remove(x)
+            imgdir = targetdir+'/images_refdiff/'
+            psfdir = targetdir+'/images_diffpsf/'
+            imgfiles = np.array(glob.glob(imgdir+'*.fits'))
+            arg = np.argsort(imgfiles)
+            imgfiles = imgfiles[arg]
+            psffiles = np.array(glob.glob(psfdir+'*.fits'))
+            arg = np.argsort(psffiles)
+            psffiles = psffiles[arg]
+            n = len(imgfiles)
+        
         for i in range(n):
-            if i%30 == 0:
+            if i%50 == 0:
                 print ('In progress: %d in %d...' %(i, n))
             imgpath = imgfiles[i]
             psfpath = psffiles[i]
@@ -126,6 +150,98 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
                 os.remove(imgfiles[i])
                 os.remove(psffiles[i])
         print ('\n')
+    
+    
+def download_marshal_lightcurve(name, targetdir):
+    '''
+    download the marshal lightcurve and plot it, save the figure to targetdir
+    '''
+    try:
+        os.stat(targetdir)
+    except:
+        os.mkdir(targetdir)
+        
+    try:
+        os.stat(targetdir+'lightcurves/')
+    except:
+        os.mkdir(targetdir+'lightcurves/')
+        
+    ####################### download marshal lightcurve #######################
+    try:
+        os.stat(targetdir+'lightcurves/marshal_lc_'+name+'.csv')
+    except:
+        r = requests.get('http://skipper.caltech.edu:8080/cgi-bin/growth/plot_lc.cgi?name='+name, 
+                         auth=(DEFAULT_AUTH_marshal[0], DEFAULT_AUTH_marshal[1]))
+        tables = pd.read_html(r.content)
+        mtb = tables[14]
+        mtb = mtb.drop([0], axis=1)
+        mtb.to_csv(targetdir+'lightcurves/'+'/marshal_lc_'+name+'.csv',header=False, index = False)
+    
+    ###################### visualize marshal lightcurve #######################
+    mtb = asci.read(targetdir+'lightcurves/'+'/marshal_lc_'+name+'.csv')
+    ix = mtb['absmag']!=99
+    mtb = mtb[ix]
+    
+    ixr = mtb['filter']=='r'
+    ixg = mtb['filter']=='g'
+            
+    plt.figure(figsize=(6, 6))
+    ax1 = plt.subplot(211)
+        
+    ax1.errorbar(mtb['jdobs'][ixr], mtb['mag'][ixr], mtb['emag'][ixr], fmt='.r', alpha=0.1)
+    ax1.errorbar(mtb['jdobs'][ixg], mtb['mag'][ixg], mtb['emag'][ixg], fmt='.g', alpha=0.1)
+    ax1.set_title(name, fontsize=14)
+    ylim = ax1.get_ylim()
+        
+    isdiffops = [x=='True' for x in mtb['isdiffpos'].data]
+    isdiffops = np.array(isdiffops)
+    ixrr = isdiffops&ixr
+    ixgg = isdiffops&ixg
+    ax1.errorbar(mtb['jdobs'][ixrr], mtb['mag'][ixrr], mtb['emag'][ixrr], fmt='.r')
+    ax1.errorbar(mtb['jdobs'][ixgg], mtb['mag'][ixgg], mtb['emag'][ixgg], fmt='.g')
+    ax1.set_ylim(ylim[1], ylim[0])
+    
+    ix_peak = np.where(mtb['mag'][isdiffops]==min((mtb['mag'][isdiffops])))[0][0]
+    marshal_peak_jd = mtb['jdobs'][isdiffops][ix_peak]
+    plt.plot([marshal_peak_jd-10, marshal_peak_jd-10], [ylim[1], ylim[0]], 'k:')
+    plt.plot([marshal_peak_jd+10, marshal_peak_jd+10], [ylim[1], ylim[0]], 'k:')
+        
+    ax2 = plt.subplot(212)
+    if mtb['programid'].dtype=='<U4':
+        ixno = mtb['programid']=='None'
+        mtb = mtb[~ixno]
+        ix = np.any([mtb['programid']=='0', mtb['programid']=='2', 
+                     mtb['programid']=='3'], axis=0)
+        mtb = mtb[ix]
+    else:
+        ix = np.any([mtb['programid']==0, mtb['programid']==2, 
+                     mtb['programid']==3], axis=0)
+        mtb = mtb[ix]
+        
+    ixr = mtb['filter']=='r'
+    ixg = mtb['filter']=='g'
+        
+    isdiffops = [x=='True' for x in mtb['isdiffpos'].data]
+    isdiffops = np.array(isdiffops)
+    if len(isdiffops)>0:
+        ixrr = isdiffops&ixr
+        ixgg = isdiffops&ixg
+        ax2.errorbar(mtb['jdobs'][ixr], mtb['mag'][ixr], mtb['emag'][ixr], fmt='.r', alpha=0.1)
+        ax2.errorbar(mtb['jdobs'][ixg], mtb['mag'][ixg], mtb['emag'][ixg], fmt='.g', alpha=0.1)
+        ax2.errorbar(mtb['jdobs'][ixrr], mtb['mag'][ixrr], mtb['emag'][ixrr], fmt='.r')
+        ax2.errorbar(mtb['jdobs'][ixgg], mtb['mag'][ixgg], mtb['emag'][ixgg], fmt='.g')
+    
+        plt.plot([marshal_peak_jd-10, marshal_peak_jd-10], [ylim[1], ylim[0]], 'k:')
+        plt.plot([marshal_peak_jd+10, marshal_peak_jd+10], [ylim[1], ylim[0]], 'k:')
+            
+    ax2.set_ylim(ylim[1], ylim[0])
+    xlim = ax1.get_xlim()
+    ax1.set_xlim(xlim)
+    ax2.set_xlim(xlim)
+    ax1.set_xticklabels([])
+    plt.tight_layout()
+    plt.savefig(targetdir+'marshal_lc_plot'+name+'.pdf')
+    plt.close()   
     
 
 def prepare_forced_phot(name, targetdir = 'default',
@@ -205,7 +321,6 @@ def prepare_forced_phot(name, targetdir = 'default',
     name = str(name)
     bad_threshold = -500 # Pixels with value < bad_threshold will be counted as bad pixels
     
-    
     ##### make a directory to store all the data relavant to this target ######
     if targetdir == 'default':
         cwd = os.getcwd()
@@ -213,22 +328,12 @@ def prepare_forced_phot(name, targetdir = 'default',
         try:
             os.stat(targetdir)
         except:
-             os.mkdir(targetdir)
+            os.mkdir(targetdir)
     else:
         if not targetdir.endswith(os.path.sep):
             targetdir += os.path.sep
         if not os.path.isdir(targetdir):
             os.mkdir(targetdir)
-            
-    ####################### download marshal lightcurve #######################
-    try:
-        os.stat(targetdir+'lightcurves/')
-    except:
-        os.mkdir(targetdir+'lightcurves/')
-    try:
-        os.stat(targetdir+'lightcurves/marshal_lightcurve_'+name+'.csv')
-    except:
-        marshal.download_lightcurve(name, dirout = targetdir+'lightcurves/')
     
     ################ get the marshal coordinate of this target ################
     try:
@@ -257,32 +362,32 @@ def prepare_forced_phot(name, targetdir = 'default',
     if recenter_coo == True:
         print ('Determining the coordinate based on observations around peak...')
         marshal_lc = pd.read_csv(targetdir+'lightcurves/'+ \
-                                 'marshal_lightcurve_'+name+'.csv')  
-        mags = marshal_lc['magpsf'].values
+                                 'marshal_lc_'+name+'.csv')  
+        mags = marshal_lc['mag'].values
         peak_ix = np.where(mags == mags.min())[0][0]
         peak_jd = marshal_lc['jdobs'][peak_ix]
-        fade_ix = np.where(marshal_lc['magpsf'].values!=99)[0][-1]
+        fade_ix = np.where(marshal_lc['mag'].values!=99)[0][-1]
         fade_jd = marshal_lc['jdobs'][fade_ix]
         if detection_jd == None:
-            detection_ix = np.where(marshal_lc['magpsf'].values!=99)[0][0]
+            detection_ix = np.where(marshal_lc['mag'].values!=99)[0][0]
             detection_jd = marshal_lc['jdobs'][detection_ix]
-            
+        
         if (peak_jd - detection_jd) < ndays_before_peak:
             ndays_before_peak = peak_jd - detection_jd
             print ('setting ndays_before_peak to %.2f'%ndays_before_peak)
         if (fade_jd - peak_jd) < ndays_after_peak:
             ndays_after_peak = fade_jd - peak_jd
             print ('setting ndays_after_peak to %.2f' %ndays_after_peak)
-    
+        
         get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
                           ndays_before_peak, ndays_after_peak)
         
         
 def get_force_lightcurve(name, targetdir, 
                          r_psf = 3, r_bkg_in = 25, r_bkg_out = 30,
-                         plot_mod = None, manual_mask = False, 
+                         plot_mod = 10000, manual_mask = False, 
                          col_mask_start = 0, col_mask_end = 0,                  
-                         row_mask_start = 0, row_mask_end = 0):
+                         row_mask_start = 0, row_mask_end = 0, verbose = False):
     '''
     Parameters:
     -----------
@@ -294,10 +399,10 @@ def get_force_lightcurve(name, targetdir,
         Set manual_mask = True when there is bad subtraction at the same region
         on every image (e.g., nucleus of the host galaxy)
         
-    plot_mod: [int | None] -optional-
+    plot_mod: [int] -optional-
         Visualization of the psf fitting every plot_mod images
         All figures will be saved to `targetdir/figures/`
-        - `plot_mod=None`: do not visualize the fitting
+        - `plot_mod=10000`: do not visualize the fitting
         - `plot_mod=1`: visualize every image 
     
     col_mask_start, col_mask_end, row_mask_start, row_mask_end: [int, >=0, <25] -optional-
@@ -329,17 +434,16 @@ def get_force_lightcurve(name, targetdir,
         except:
             print ('Error: no coordinate found!')
             
-    imgdir = targetdir+'/images_refdiff/'
-    psfdir = targetdir+'/images_diffpsf/'
+    imgdir = targetdir+'images_refdiff/'
+    psfdir = targetdir+'images_diffpsf/'
     
-    if plot_mod != None:
-        try:
-            os.stat(targetdir+'/figures/')
-            figurefiles = glob.glob(targetdir+'/figures/*')
-            for item in figurefiles:
-                os.remove(item)
-        except:
-            os.mkdir(targetdir+'/figures/')
+    try:
+        os.stat(targetdir+'figures/')
+        figurefiles = glob.glob(targetdir+'figures/*')
+        for item in figurefiles:
+            os.remove(item)
+    except:
+        os.mkdir(targetdir+'figures/')
     
     #################### load psf and refdiff image files #####################
     imgfiles = np.array(glob.glob(imgdir+'*.fits'))
@@ -356,6 +460,10 @@ def get_force_lightcurve(name, targetdir,
     ezp_ = np.ones(n)*(99)
     seeing_ = np.ones(n)*(99)
     programid_ = np.zeros(n)
+    field_ = np.zeros(n)
+    ccdid_ = np.zeros(n)
+    qid_ = np.zeros(n)
+    filtercode_ = np.zeros(n)
     
     Fpsf_ = np.ones(n)*(99)
     eFpsf_ = np.ones(n)*(99)
@@ -364,77 +472,64 @@ def get_force_lightcurve(name, targetdir,
     nbads_ = np.zeros(n)
     nbadbkgs_ = np.zeros(n)
     chi2red_ = np.zeros(n)
+    gains_ = np.zeros(n)
     
     ######################## dalta analysis: ight curve ########################
     print ('\n')
-    print ('Start fitting porced light curve for %s...'%name)
+    print ('Start fitting forced light curve for %s...'%name)
     for i in range(n):
         if i%20==0:
             print ('In progress: %d in %d...' %(i, n))
         imgpath = imgfiles[i]
         psfpath = psffiles[i]
         pobj = ZTFphot(name, ra, dec, imgpath, psfpath, bad_threshold, r_psf, 
-                       r_bkg_in, r_bkg_out)
+                       r_bkg_in, r_bkg_out, verbose)
         zp_[i] = pobj.zp
         ezp_[i] = pobj.e_zp
         seeing_[i] = pobj.seeing
         jdobs_[i] = pobj.obsjd
         filter_[i] = pobj.filter
+        gains_[i] = pobj.gain
         programid_[i] = pobj.programid
+        field_[i] = pobj.fieldid
+        ccdid_[i] = pobj.ccdid
+        qid_[i] = pobj.qid
+        filtercode_[i] = pobj.filterid
         if pobj.status == False:
             continue
         
         pobj.load_source_cutout() 
-        pobj.load_bkg_cutout()
+        if pobj.status == False:
+                continue
+        pobj.load_bkg_cutout(manual_mask, col_mask_start, col_mask_end,
+                             row_mask_start, row_mask_end)
         
-        pobj.get_scr_cor_fn(manual_mask, col_mask_start, col_mask_end,
-                            row_mask_start, row_mask_end)        
+        pobj.get_scr_cor_fn()        
         pobj.fit_psf()
         Fpsf_[i] = pobj.Fpsf
+        Fap_[i] = pobj.Fap
         eFpsf_[i] = pobj.eFpsf
         rvalue_[i] = pobj.r_value
         nbads_[i] = pobj.nbad
         nbadbkgs_[i] = pobj.nbad_bkg
         chi2red_[i] = pobj.chi2_red
         
-        if plot_mod!=None:
-            if i%plot_mod==0:
-                savepath = targetdir+'/figures/'+repr(i)+'_'+\
-                            imgpath.split('/')[-1].split('_sci')[0]
-                pobj.plot_cutouts(savepath = savepath)
+        if i%plot_mod==0 or pobj.nbad!=0:
+            savepath = targetdir+'/figures/'+repr(i)+'_'+\
+                    imgpath.split('/')[-1].split('_sci')[0]
+            pobj.plot_cutouts(savepath = savepath)
     print ('\n')
-    
-    #plt.plot(chi2red_, '.')
-    #plt.ylim(0,20)
     
     ####################### save the results to a file ########################
     print ('writing light curve to database')
-    data = [jdobs_, filter_, seeing_, zp_, ezp_, Fpsf_, eFpsf_, Fap_, 
-            rvalue_, nbads_, nbadbkgs_, chi2red_, programid_]
+    data = [jdobs_, filter_, seeing_, gains_, zp_, ezp_, Fpsf_, eFpsf_, Fap_, 
+            rvalue_, nbads_, nbadbkgs_, chi2red_, programid_, field_,
+            ccdid_, qid_, filtercode_]
     
-    my_lc = Table(data,names=['jdobs','filter', 'seeing', 'zp', 'ezp',
+    my_lc = Table(data,names=['jdobs','filter', 'seeing', 'gain', 'zp', 'ezp',
                               'Fpsf', 'eFpsf', 'Fap', 'rvalue', 'nbad',
-                              'nbadbkg', 'chi2red', 'programid'])
+                              'nbadbkg', 'chi2red', 'programid', 'fieldid',
+                              'ccdid', 'qid', 'filterid'])
     
-    my_lc.write(targetdir+'/lightcurves/force_phot_'+name+'_temp.fits', overwrite=True)
+    my_lc.write(targetdir+'/lightcurves/force_phot_'+name+'_output1.fits', overwrite=True)
     
-    
-def quicklook_mylc(name, targetdir):
-    # np.sum(mylc['nbad']!=0)
-    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_'+name+'_temp.fits')[1].data) 
-    ix = mylc['rvalue']!=0
-    mylc = mylc[ix]
-    
-    ixr = mylc['filter']=='r'
-    ixg = mylc['filter']=='g'
-    
-    plt.figure(figsize=(12,6))
-    matplotlib.rcParams.update({'font.size': 15})
-    plt.errorbar(mylc['jdobs'][ixr], mylc['Fpsf'][ixr], mylc['eFpsf'][ixr], fmt='.r', alpha=0.5)
-    plt.errorbar(mylc['jdobs'][ixg], mylc['Fpsf'][ixg], mylc['eFpsf'][ixg], fmt='.g', alpha=0.5)
-    
-    ixk = mylc['seeing'] > 3.0
-    plt.errorbar(mylc['jdobs'][ixk], mylc['Fpsf'][ixk], mylc['eFpsf'][ixk], fmt='.b')
-    
-    ixk = mylc['seeing'] > 3.5
-    plt.errorbar(mylc['jdobs'][ixk], mylc['Fpsf'][ixk], mylc['eFpsf'][ixk], fmt='.k')

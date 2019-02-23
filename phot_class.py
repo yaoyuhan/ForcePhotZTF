@@ -8,20 +8,20 @@ Created on Wed Nov 21 12:36:23 2018
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+
 from scipy import ndimage
 from copy import deepcopy
+
 from astropy import wcs
 from astropy.io import fits
 from astropy.visualization import SqrtStretch
 from astropy.visualization.mpl_normalize import ImageNormalize
+
 from photutils import CircularAnnulus
 from image_registration import chi2_shift_iterzoom#, chi2_shift
 
-import random
-random.seed(0)
 
-
-def mylinear_fit(x, y, yerr, npar=2):
+def mylinear_fit(x, y, yerr, npar = 1):
     '''
     Ref: 
         1. Numerical Recipes, 3rd Edition, p745, 781 - 782
@@ -58,7 +58,7 @@ def mylinear_fit(x, y, yerr, npar=2):
 class ZTFphot(object):
     
     def __init__(self, name, ra, dec, imgpath, psfpath, bad_threshold=-500, 
-                 r_psf=3, r_bkg_in=10, r_bkg_out=15):
+                 r_psf=3, r_bkg_in=10, r_bkg_out=15, verbose=False):
         self.name = name
         self.ra = ra
         self.dec = dec
@@ -69,6 +69,7 @@ class ZTFphot(object):
         self.r_bkg_out = r_bkg_out
         self.bad_threshold = bad_threshold
         self.length = 2*r_psf + 1
+        self.verbose = verbose
     
         hd = fits.open(imgpath)[1].header
         dt = fits.open(imgpath)[1].data
@@ -76,19 +77,15 @@ class ZTFphot(object):
         n_dtx = dt.shape[1]
         w = wcs.WCS(hd)
         world =  np.array([[ra, dec]], np.float_)
-        pixcrd = w.wcs_world2pix(world, 1)
-        # need to subtract 1 !
-        # since physical coordinate in python starts from 0, not 1
-        pixX = pixcrd[0, 0]-1 
-        pixY = pixcrd[0, 1]-1
+        pixcrd = w.wcs_world2pix(world, 0)
+        pixX = pixcrd[0, 0]
+        pixY = pixcrd[0, 1]
         
         self.pixX = pixX
         self.pixY = pixY
         self.n_dty = n_dty
         self.n_dtx = n_dtx
         
-        # plt.imshow(dt, origin = 'power left', vmin = -10, vmax = 100)
-        # plt.plot(pixX, pixY, 'r.')
         
         if np.isnan(pixX)==1 or np.isnan(pixY)==1:
             self.status = False
@@ -120,13 +117,29 @@ class ZTFphot(object):
         self.e_zp = hd['MAGZPUNC']
         self.filter = hd['FILTER'][4]
         self.gain = hd['GAIN']
+        # self.gain = 6.2 # Frank use this number ... ?
         self.seeing = hd['SEEING']
         self.programid = hd['PROGRMID']
+        self.fieldid = hd['FIELDID']
+        if 'CCDID' in hd.keys():
+            self.ccdid = hd['CCDID']
+        elif 'CCD_ID' in hd.keys():
+            self.ccdid = hd['CCD_ID']
+        if 'QID' in hd.keys():
+            self.qid = hd['QID']
+        else:
+            self.qid = 99
+        self.filterid = hd['FILTERID']
             
         # load psf cutout
         psf_fn = fits.open(psfpath)[0].data[12-r_psf:12+r_psf+1, 12-r_psf:12+r_psf+1]
         self.psf_fn = psf_fn  
         
+        # print out infomation
+        if self.verbose == True:
+            print ('processing record for %s'%self.imgpath)
+            print ('\t gain=%.2f, diff_zp = %.4f'%(self.gain, self.zp))
+            
         
     def load_source_cutout(self):
         '''
@@ -172,6 +185,9 @@ class ZTFphot(object):
         self.nbad = nbad
         self.scr_fn = scr_fn
         
+        if scr_fn.shape[0]!=length or scr_fn.shape[1]!=length:
+            self.status = False
+        
         if nbad!=0:
             print ('%d bad pixels in %d*%d source frame' %(nbad, length, length))
         
@@ -196,7 +212,8 @@ class ZTFphot(object):
         self.dec_cor = dec_cor
         
         
-    def load_bkg_cutout(self):
+    def load_bkg_cutout(self, manual_mask=False, col_mask_start=0, col_mask_end=0,
+                              row_mask_start=0, row_mask_end=0):
         '''
         imgpath = pobj.imgpath
         pixX = pobj.pixX
@@ -221,6 +238,9 @@ class ZTFphot(object):
         
         bkg_fn = deepcopy(annulus_data)
         bad_bkg_mask = annulus_data <= bad_threshold
+        if manual_mask == True:    
+            bad_bkg_mask[r_bkg_out+row_mask_start:r_bkg_out+row_mask_end, 
+                         r_bkg_out+col_mask_start:r_bkg_out+col_mask_end] = True
         bkg_fn[bad_bkg_mask] = np.nan
         nbad_bkg = np.sum(bad_bkg_mask)
             
@@ -231,12 +251,18 @@ class ZTFphot(object):
         bkg_fn[setnan] = np.nan
         bkgstd = np.nanstd(bkg_fn) 
         
-        self.bkgstd = bkgstd
+        temp = bkg_fn.ravel()
+        temp = temp[~np.isnan(temp)]
+        bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
+        
+        self.bkgstd = bkgstd 
         self.bkg_fn = bkg_fn
         
+        if self.verbose == True:
+            print ('\t bkgstd pixel RMS in original diff-image cutout = %.2f DN'%(self.bkgstd))
         
-    def get_scr_cor_fn(self, manual_mask, col_mask_start, col_mask_end,
-                       row_mask_start, row_mask_end):
+        
+    def get_scr_cor_fn(self):
         '''
         psf_fn = pobj.psf_fn
         bad_mask = pobj.bad_mask
@@ -249,12 +275,6 @@ class ZTFphot(object):
         scr_fn = self.scr_fn
         gain = self.gain
         bkgstd = self.bkgstd
-        r_psf = self.r_psf
-        
-        if manual_mask == True:     
-            manual_mask = np.zeros((2*r_psf+1, 2*r_psf+1), dtype = bool)
-            manual_mask[col_mask_start:col_mask_end, row_mask_start:row_mask_end] = True
-            bad_mask[manual_mask] = True
             
         ind = (scr_fn/gain + bkgstd**2<0)
         if np.sum(ind)!=0:
@@ -309,7 +329,10 @@ class ZTFphot(object):
         self.r_value = round(pearson_r, 3)   
         self.Fap = np.sum(_scr_cor_ravel)/np.sum(_psf_ravel)
         self.chi2_red = chi2_red
-        self.yerrs = _yerr        
+        self.yerrs = _yerr    
+        if self.verbose == True:
+            print ('\t Fpsf = %.2f DN, eFpsf = %.2f DN, chi2_red = %.2f'%(self.Fpsf, self.eFpsf, self.chi2_red))
+        
         
     def plot_cutouts(self, savepath=None):
         '''
@@ -342,7 +365,7 @@ class ZTFphot(object):
         yerrs = self.yerrs
         
         model_fn = psf_fn*Fpsf
-        _model_ravel = model_fn.ravel()
+        _model_ravel = model_fn[~bad_mask]
     
         fig, ax = plt.subplots(3, 5, figsize=(15, 9.5))
         matplotlib.rcParams.update({'font.size': 15})
@@ -378,14 +401,13 @@ class ZTFphot(object):
         plt.text(0 ,yloc2, 'seeing = %.3f'%seeing)
         
         ax5 = plt.subplot2grid((9, 1), (7, 0), rowspan=2)
-        ax5.plot(_scr_cor_ravel - _model_ravel, '.k', label='obs - fitted', zorder=2)
+        ax5.plot(_scr_cor_ravel - _model_ravel, '.k', label='obs-fitted', zorder=2)
         ax5.plot(yerrs, '.-r', label='uncertianties', zorder=1)
+        ax5.plot(-yerrs, '.-r', zorder=1)
         ax5.set_xlim(0-1, length**2+1)
         ax5.legend(loc='upper right')
-        ylims = ax5.get_ylim()
-        ymaxabs = max(abs(ylims[0]), abs(ylims[1]))
-        ax5.set_ylim(-1*ymaxabs, ymaxabs)
         plt.plot([0, length**2], [0,0], color='grey', linewidth = 2, alpha= 0.5)
+        
         
         if savepath is not None:
             plt.savefig(savepath)
