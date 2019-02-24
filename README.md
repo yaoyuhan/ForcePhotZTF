@@ -20,7 +20,7 @@ ForcePhotZTF performs multiple tasks including:
 
 You need to provide your username and password (save them to a file) in the format of 'username:password\n'. Prepare four txt files:
 1. auth_fps.txt <br>
-(If you do know have the access, just print ' : \n' to this file and do not run the final step shown in the demo)
+(If you do not have the access, just print ' : \n' to this file and do not run the final step shown in the demo)
 2. auth_ipac.txt
 3. auth_kowalski.txt <br>
 (This is not necessary in any of the main steps. Thus, just print ' : \n' to this file if you do not have Kowalski access)
