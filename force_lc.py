@@ -239,8 +239,11 @@ def download_marshal_lightcurve(name, targetdir):
     ax1.set_xlim(xlim)
     ax2.set_xlim(xlim)
     ax1.set_xticklabels([])
+    ax2.set_xlabel('jd')
+    ax2.set_ylabel('mag')
+    ax1.set_ylabel('mag')
     plt.tight_layout()
-    plt.savefig(targetdir+'marshal_lc_plot'+name+'.pdf')
+    plt.savefig(targetdir+'marshal_lc_plot'+name+'.png')
     plt.close()   
     
 

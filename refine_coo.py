@@ -8,9 +8,11 @@ Created on Fri Dec 21 17:27:04 2018
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.stats import sigma_clip
+
 from ztfquery import marshal
 from ForcePhotZTF.phot_class import ZTFphot
     
@@ -78,7 +80,6 @@ def astrometry_spread(name, raset, decset, ra, dec, ra1, dec1):
     plt.legend(loc = 'best', fontsize = fontsize)
     plt.tight_layout()
      
-    
     
 def get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
                       ndays_before_peak, ndays_after_peak):
@@ -162,6 +163,6 @@ def get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
         dec = np.median(decset)
         
         astrometry_spread(name, raset, decset, ra, dec, ra1, dec1)
-        plt.savefig(targetdir+'/astrometry.pdf')
+        plt.savefig(targetdir+'/astrometry.png')
         plt.close()
         np.savetxt(targetdir+'/coo.reg', [ra,dec])
