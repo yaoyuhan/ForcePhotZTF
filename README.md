@@ -29,6 +29,9 @@ You need to provide your username and password (save them to a file) in the form
 ## How to use this package.
 Please see demo.ipynb
 
+## Plan
+I'm thinking about using MCMC to estimate the fitting slope. 
+
 ## Scripts not relavant to forced-PSF photometry, but might be useful:
 #### reference.py 
 
