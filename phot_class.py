@@ -213,8 +213,8 @@ class ZTFphot(object):
         
         
     def load_bkg_cutout(self, manual_mask=False, col_mask_start=0, col_mask_end=0,
-                              row_mask_start=0, row_mask_end=0):
-        '''
+                        row_mask_start=0, row_mask_end=0):
+        '''       
         imgpath = pobj.imgpath
         pixX = pobj.pixX
         pixY = pobj.pixY  
@@ -253,7 +253,9 @@ class ZTFphot(object):
         
         temp = bkg_fn.ravel()
         temp = temp[~np.isnan(temp)]
-        bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
+        # 20190304: standard deviation is not as robust as median absolute deviation
+        # bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
+        bkgstd = np.median(abs(temp - np.median(temp)))
         
         self.bkgstd = bkgstd 
         self.bkg_fn = bkg_fn
@@ -296,14 +298,14 @@ class ZTFphot(object):
         bad_mask = pobj.bad_mask
         bkgstd = pobj.bkgstd
         gain  = pobj.gain
-        length = pobj.length
+        # length = pobj.length
         '''
         psf_fn = self.psf_fn  
         scr_cor_fn = self.scr_cor_fn            
         bad_mask = self.bad_mask
         bkgstd = self.bkgstd
         gain = self.gain
-        length = self.length
+        # length = self.length
         
         _psf_ravel = psf_fn[~bad_mask]
         _scr_cor_ravel = scr_cor_fn[~bad_mask]
@@ -314,12 +316,12 @@ class ZTFphot(object):
         # one-parameter fit
         Fpsf, eFpsf, apsf, pearson_r = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar=1)
         # calculate chi
-        resi = _psf_ravel*Fpsf - _scr_cor_ravel
+        resi = _scr_cor_ravel - _psf_ravel*Fpsf
         res_over_error = resi/_yerr
         # plt.plot(resi, 'r')
         # plt.plot(_yerr, 'k') 
         chi2 = np.sum(res_over_error**2)
-        chi2_red = chi2 / (length**2-1)
+        chi2_red = chi2 / (len(_psf_ravel)-1)
         
         self._psf_ravel = _psf_ravel
         self._scr_cor_ravel = _scr_cor_ravel
@@ -348,10 +350,11 @@ class ZTFphot(object):
         seeing = pobj.seeing
         length = pobj.length
         yerrs = pobj.yerrs
+        chi2_red = pobj.chi2_red
         '''
         cmap_name = 'viridis'
         
-        scr_fn = self.scr_fn
+        # scr_fn = self.scr_fn
         _scr_cor_ravel = self._scr_cor_ravel
         scr_cor_fn = self.scr_cor_fn
         psf_fn= self.psf_fn
@@ -361,54 +364,70 @@ class ZTFphot(object):
         filtername = self.filter
         bkg_fn = self.bkg_fn
         seeing = self.seeing
-        length = self.length
+        # length = self.length
         yerrs = self.yerrs
+        chi2_red = self.chi2_red
         
         model_fn = psf_fn*Fpsf
         _model_ravel = model_fn[~bad_mask]
+        _psf_ravel = psf_fn[~bad_mask]
     
-        fig, ax = plt.subplots(3, 5, figsize=(15, 9.5))
+        fig, ax = plt.subplots(4, 4, figsize=(9, 9))
         matplotlib.rcParams.update({'font.size': 15})
+        '''
         norm = ImageNormalize(stretch=SqrtStretch())
         if np.sum(bad_mask) != 0:
             ax[0,0].imshow(scr_fn, cmap = cmap_name, origin='lower', norm=norm)
             ax[0,0].set_title('Unmasked, '+filtername, fontsize=15)
         else:
             ax[0,0].set_axis_off()
+        '''
         norm2 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,1].imshow(scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
-        ax[0,2].imshow(model_fn, cmap = cmap_name, origin='lower', norm=norm2)
-        ax[0,1].set_title('Data, '+filtername, fontsize=15)
-        ax[0,2].set_title('PSF model', fontsize=15)
-        ax[0,4].imshow(bkg_fn, cmap = cmap_name, origin='lower', norm=norm2)
-        ax[0,4].set_title('background', fontsize=15)
+        ax[0,0].imshow(scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,0].set_title('Data, '+filtername, fontsize=15)
+        ax[0,1].imshow(model_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,1].set_title('PSF model', fontsize=15)
+        ax[0,3].imshow(bkg_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,3].set_title('Background', fontsize=15)
         
         norm1 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,3].imshow(scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
-        ax[0,3].set_title('Residual', fontsize=15)
-        plt.tight_layout()
+        ax[0,2].imshow(scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
+        ax[0,2].set_title('Residual', fontsize=15)
+        ax[0][0].set_xticklabels([])
+        ax[0][0].set_yticklabels([])
+        ax[0][1].set_xticklabels([])
+        ax[0][1].set_yticklabels([])
+        ax[0][2].set_xticklabels([])
+        ax[0][2].set_yticklabels([])
+        ax[0][3].set_xticklabels([])
+        ax[0][3].set_yticklabels([])
+        ax[0,0].tick_params(axis='both', which='both', direction='in')
+        ax[0,1].tick_params(axis='both', which='both', direction='in')
+        ax[0,2].tick_params(axis='both', which='both', direction='in')
+        ax[0,3].tick_params(axis='both', which='both', direction='in')
         
-        ax4 = plt.subplot2grid((9, 1), (3, 0), rowspan=4)
-        ax4.plot(_scr_cor_ravel, 'r--', label='obs')
-        ax4.plot(_model_ravel, 'b--', label='fitted')
-        ax4.set_xlim(0-1, length**2+1)
-        ax4.legend(loc='upper right')
+        ax4 = plt.subplot2grid((4, 1), (1, 0), rowspan=2)
+        ax4.errorbar(_psf_ravel, _scr_cor_ravel, yerrs, fmt='.k')
+        xx = np.array([np.min(_psf_ravel), np.max(_psf_ravel)])
+        ax4.plot(xx, Fpsf*xx, 'r-')
+        ax4.tick_params(axis='both', which='both', direction='in')
+        # ax4.set_xlim(0-1, length**2+1)
+
         ylims = ax4.get_ylim()
         ax4.set_xticklabels([])
-        yloc1 = ylims[0] + (ylims[1] - ylims[0])*0.7
-        plt.text(0 ,yloc1, 'flux = %.1f, e_flux = %.1f'%(Fpsf, eFpsf))
-        yloc2 = ylims[0] + (ylims[1] - ylims[0])*0.6
-        plt.text(0 ,yloc2, 'seeing = %.3f'%seeing)
+        yloc1 = ylims[0] + (ylims[1] - ylims[0])*0.9
+        plt.text(xx.mean() ,yloc1, 'flux = %.1f, e_flux = %.1f'%(Fpsf, eFpsf), fontsize=15, color='m')
+        yloc2 = ylims[0] + (ylims[1] - ylims[0])*0.8
+        plt.text(xx.mean() ,yloc2, 'seeing = %.3f'%seeing, fontsize=15, color='m')
+        yloc3 = ylims[0] + (ylims[1] - ylims[0])*0.1
+        plt.text(xx.mean() ,yloc3, 'chi2_red = %.3f'%chi2_red, fontsize=15, color='m')
         
-        ax5 = plt.subplot2grid((9, 1), (7, 0), rowspan=2)
-        ax5.plot(_scr_cor_ravel - _model_ravel, '.k', label='obs-fitted', zorder=2)
-        ax5.plot(yerrs, '.-r', label='uncertianties', zorder=1)
-        ax5.plot(-yerrs, '.-r', zorder=1)
-        ax5.set_xlim(0-1, length**2+1)
-        ax5.legend(loc='upper right')
-        plt.plot([0, length**2], [0,0], color='grey', linewidth = 2, alpha= 0.5)
+        ax5 = plt.subplot2grid((4, 1), (3, 0))
+        ax5.errorbar(_psf_ravel, _scr_cor_ravel-_model_ravel, yerrs, fmt='.k')
+        plt.plot(xx, [0,0], color='grey', linewidth = 2, alpha= 0.5)
+        ax5.tick_params(axis='both', which='both', direction='in')
         
-        
+        plt.tight_layout()
         if savepath is not None:
             plt.savefig(savepath)
             plt.close()

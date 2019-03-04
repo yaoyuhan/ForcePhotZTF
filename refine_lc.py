@@ -22,11 +22,11 @@ DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_ipac = DEFAULT_AUTHs[2]
 
 
-def quicklook_lc(name, targetdir, eFratio_upper_cut = 1e-8, seeing_cut = 5):
+def quicklook_lc(name, targetdir, eFratio_upper_cut = np.nan, seeing_cut = np.nan,
+                 badbkg_remove = 0, baseline_end = np.nan,
+                 suffix = '_output2.fits'):
     
-    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_'+name+'_output2.fits')[1].data) 
-    ix = mylc['nbad']==0
-    mylc = mylc[ix]
+    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_'+name+suffix)[1].data) 
     
     F0 = 10**(mylc['zp']/2.5)
     eF0 = F0 / 2.5 * np.log(10) * mylc['ezp']
@@ -53,7 +53,6 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = 1e-8, seeing_cut = 5):
             fcqf_uniq.append(x)
     fcqf_uniq = np.array(fcqf_uniq)
     
-
     plt.figure(figsize=(10,10))
     matplotlib.rcParams.update({'font.size': 15})
     ax1 = plt.subplot(311)
@@ -75,6 +74,17 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = 1e-8, seeing_cut = 5):
         ax1.errorbar(sublc['jdobs'], sublc['Fratio'], sublc['eFratio'], fmt='.', color=color)
         ax2.errorbar(sublc['jdobs'], sublc['Fpsf'].data, sublc['eFpsf'], fmt='.', color=color)
         
+        ix = sublc['nbad']!=0
+        if np.sum(ix)>0:
+            ax1.errorbar(sublc['jdobs'][ix], sublc['Fratio'][ix], sublc['eFratio'][ix], fmt='.k')
+            ax2.errorbar(sublc['jdobs'][ix], sublc['Fpsf'][ix].data, sublc['eFpsf'][ix], fmt='.k')
+            
+        if badbkg_remove==1:
+            ix = sublc['nbadbkg']!=0    
+            if np.sum(ix)>0:
+                ax1.errorbar(sublc['jdobs'][ix], sublc['Fratio'][ix], sublc['eFratio'][ix], fmt='.', color='grey')
+                ax2.errorbar(sublc['jdobs'][ix], sublc['Fpsf'][ix].data, sublc['eFpsf'][ix], fmt='.', color='grey')
+        
         ix = sublc['Fratio']>3*sublc['eFratio']
         subsublc = sublc[ix]
         
@@ -88,6 +98,11 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = 1e-8, seeing_cut = 5):
     ylims2 = [ylims2[0], ylims2[1]]
     ylims3 = ax3.get_ylim()
     ax3.set_ylim(ylims3[1], ylims3[0])
+    
+    if np.isnan(baseline_end)==False:
+        ax1.plot([baseline_end,baseline_end], ylims1, 'k--')
+        ax2.plot([baseline_end,baseline_end], ylims2, 'k--')
+        ax3.plot([baseline_end,baseline_end], ylims3, 'k--')
     
     xlims = ax1.set_xlim()
     ax3.set_xlim(xlims[0], xlims[1])
@@ -109,49 +124,57 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = 1e-8, seeing_cut = 5):
     plt.savefig(targetdir+name+'_quicklook.pdf')
 
 
-def get_recerence_jds(name, targetdir, partnership=False):
+def get_recerence_jds(name, targetdir, partnership=False, iband = False):
     print ('Start getting jd of reference exposures for %s'%name)
     s = requests.Session()
     s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
            data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
     
     mylc = Table(fits.open(targetdir+'lightcurves/force_phot_' + name + '_output1.fits')[1].data)
-    ix= np.any([mylc['filter']=='r', mylc['filter']=='g'], axis=0)
+    if iband==False:
+        ix= np.any([mylc['filter']=='r', mylc['filter']=='g'], axis=0)
+        mylc = mylc[ix]
+    ix = mylc['rvalue']!=0
     mylc = mylc[ix]
-        
+    
     if partnership==True:
         ix = mylc['programid']==2
         mylc = mylc[ix]
-    irsaq = pd.read_csv(targetdir+'irsafile.csv')
-    irsa = Table([irsaq['field'].values, irsaq['ccdid'].values, irsaq['fid'].values,
-                  irsaq['qid'].values, irsaq['obsjd'].values], 
-                    names = ['field', 'ccdid', 'fid', 'qid', 'obsjd'])
+            
+    if 'fieldid' in mylc.colnames:
+        mylc.rename_column('fieldid', 'field') 
+    else:
+        irsaq = pd.read_csv(targetdir+'irsafile.csv')
+        irsa = Table([irsaq['field'].values, irsaq['ccdid'].values, irsaq['fid'].values,
+                      irsaq['qid'].values, irsaq['obsjd'].values], 
+                      names = ['field', 'ccdid', 'fid', 'qid', 'obsjd'])
+        ix = np.any([irsa['fid']==2, irsa['fid']==1], axis=0)
+        irsa = irsa[ix]
     
-    irsa_jds = np.round(irsa['obsjd'], 7)
-    irsa_fids = irsa['fid'].data
-    irsa_code = irsa_fids*10000000 + irsa_jds
-    irsa['code'] = irsa_code
+        irsa_jds = np.round(irsa['obsjd'], 7)
+        irsa_fids = irsa['fid'].data
+        irsa_code = irsa_fids*10000000 + irsa_jds
+        irsa['code'] = irsa_code
         
-    mylc_jds = np.round(mylc['jdobs'], 7)
-    mylc_fids = np.zeros(len(mylc), dtype=int)
-    mylc_fids[mylc['filter']=='g']=1
-    mylc_fids[mylc['filter']=='r']=2
-    mylc_code = mylc_fids*10000000 + mylc_jds
-    mylc['filterid'] = mylc_fids
-    mylc['code'] = mylc_code
+        mylc_jds = np.round(mylc['jdobs'], 7)
+        mylc_fids = np.zeros(len(mylc), dtype=int)
+        mylc_fids[mylc['filter']=='g']=1
+        mylc_fids[mylc['filter']=='r']=2
+        mylc_code = mylc_fids*10000000 + mylc_jds
+        mylc['filterid'] = mylc_fids
+        mylc['code'] = mylc_code
     
-    ix = np.in1d(mylc_code, irsa_code)
-    assert np.sum(ix)==len(mylc_code)
-    ix= np.in1d(irsa_code, mylc_code)
-    assert np.sum(ix)==len(mylc_code)
-    
-    ira = irsa[ix]
+        ix = np.in1d(mylc_code, irsa_code)
+        assert np.sum(ix)==len(mylc_code)
+        ix= np.in1d(irsa_code, mylc_code)
+        assert np.sum(ix)==len(mylc_code)
+        ira = irsa[ix]
         
-    ira = ira[np.argsort(ira['code'])]
-    mylc = mylc[np.argsort(mylc['code'])]
-    mylc['field'] = ira['field']
-    mylc['ccdid'] = ira['ccdid']
-    mylc['qid'] = ira['qid']
+        ira = ira[np.argsort(ira['code'])]
+        mylc = mylc[np.argsort(mylc['code'])]
+        mylc['field'] = ira['field']
+        mylc['ccdid'] = ira['ccdid']
+        mylc['qid'] = ira['qid']
     
     mylc['fcqf'] = mylc['field']*10000 + mylc['ccdid']*100 + mylc['qid']*10 + mylc['filterid']
     fcq_uniq = []
@@ -203,5 +226,5 @@ def get_recerence_jds(name, targetdir, partnership=False):
     mylc['jdref_start'] = jdref_start
     mylc['jdref_end'] = jdref_end
         
-    mylc.write(targetdir+'lightcurves/force_phot_' + name + '_output2.fits',
+    mylc.write(targetdir+'lightcurves/force_phot_' + name + '_output2.fits', 
                overwrite=True)  

@@ -390,7 +390,8 @@ def get_force_lightcurve(name, targetdir,
                          r_psf = 3, r_bkg_in = 25, r_bkg_out = 30,
                          plot_mod = 10000, manual_mask = False, 
                          col_mask_start = 0, col_mask_end = 0,                  
-                         row_mask_start = 0, row_mask_end = 0, verbose = False):
+                         row_mask_start = 0, row_mask_end = 0, verbose = False,
+                         save_xy = False):
     '''
     Parameters:
     -----------
@@ -416,9 +417,14 @@ def get_force_lightcurve(name, targetdir,
         pixel unit. Note that P48 pixel scale is 1.012 arcsec per pixel
         The default values are recommended.
         
+    save_xy: [bool] -optional-
+        whether to save the cutout values when doing this fitting.
+        If save_xy = True, this function will output a separate file to 
+        targetdir/lightcurves/xydata_name.fits
+        
     Outputs:
     --------
-    `targetdir/lightcurves/force_phot_ZTFname_temp.csv: [file]
+    `targetdir/lightcurves/force_phot_ZTFname_output1.fits: [file]
         force photometry lightcurve [before calibration]
     
     `targetdir/figures/`: [directory]
@@ -477,6 +483,12 @@ def get_force_lightcurve(name, targetdir,
     chi2red_ = np.zeros(n)
     gains_ = np.zeros(n)
     
+    if save_xy == True:
+        path_cutouts = []
+        psf_cutouts = []
+        img_cutouts = []
+        eimg_cutouts = []
+    
     ######################## dalta analysis: ight curve ########################
     print ('\n')
     print ('Start fitting forced light curve for %s...'%name)
@@ -503,7 +515,8 @@ def get_force_lightcurve(name, targetdir,
         
         pobj.load_source_cutout() 
         if pobj.status == False:
-                continue
+            continue
+            
         pobj.load_bkg_cutout(manual_mask, col_mask_start, col_mask_end,
                              row_mask_start, row_mask_end)
         
@@ -517,22 +530,57 @@ def get_force_lightcurve(name, targetdir,
         nbadbkgs_[i] = pobj.nbad_bkg
         chi2red_[i] = pobj.chi2_red
         
-        if i%plot_mod==0 or pobj.nbad!=0:
+        if save_xy==True:
+            path_cutouts.append(imgpath.split('/')[-1])
+            psf_cutouts.append(pobj.psf_fn[~pobj.bad_mask])
+            img_cutouts.append(pobj.scr_cor_fn[~pobj.bad_mask])
+            eimg_cutouts.append(pobj.yerrs)
+        
+        # if i%plot_mod==0 or pobj.nbad!=0:
+        if i%plot_mod==0:
             savepath = targetdir+'/figures/'+repr(i)+'_'+\
                     imgpath.split('/')[-1].split('_sci')[0]
             pobj.plot_cutouts(savepath = savepath)
     print ('\n')
     
     ####################### save the results to a file ########################
+    diffimgname = np.array([x.split('/')[-1]for x in imgfiles])
+    psfimgname = np.array([x.split('/')[-1]for x in psffiles])
     print ('writing light curve to database')
     data = [jdobs_, filter_, seeing_, gains_, zp_, ezp_, Fpsf_, eFpsf_, Fap_, 
             rvalue_, nbads_, nbadbkgs_, chi2red_, programid_, field_,
-            ccdid_, qid_, filtercode_]
+            ccdid_, qid_, filtercode_, diffimgname, psfimgname]
     
     my_lc = Table(data,names=['jdobs','filter', 'seeing', 'gain', 'zp', 'ezp',
                               'Fpsf', 'eFpsf', 'Fap', 'rvalue', 'nbad',
                               'nbadbkg', 'chi2red', 'programid', 'fieldid',
-                              'ccdid', 'qid', 'filterid'])
+                              'ccdid', 'qid', 'filterid', 'diffimgname', 'psfimgname'])
     
     my_lc.write(targetdir+'/lightcurves/force_phot_'+name+'_output1.fits', overwrite=True)
     
+    if save_xy==True:
+        path_cutouts = np.array(path_cutouts)
+        psf_cutouts = np.array(psf_cutouts)
+        img_cutouts = np.array(img_cutouts)
+        xs = []
+        ys = []
+        eys = []
+        ps = []
+        index = []
+        for i in range(len(path_cutouts)):
+            for x in psf_cutouts[i]:
+                xs.append(x)
+                ps.append(path_cutouts[i])
+            for y in img_cutouts[i]:
+                ys.append(y)
+                index.append(i)  
+            for ey in eimg_cutouts[i]:
+                eys.append(ey)
+        
+        my_dt = Table([index, xs, ys, eys, ps], names = ['index', 'x', 'y', 'ey', 'path'])
+        my_dt.write(targetdir+'/lightcurves/xydata_'+name+'.fits', overwrite=True)
+        
+        
+        
+        
+        
