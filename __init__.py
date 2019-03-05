@@ -11,4 +11,5 @@ __all__ = ['force_lc',
            'compare_lc',
            'refine_coo',
            'phot_class',
-           'keypairs']
+           'keypairs',
+           'salt2_fit']

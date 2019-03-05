@@ -32,6 +32,17 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
                                     open_check = False):
     '''
     Download subtracted images and psf images from irsa
+
+    This function will create two folders to store fits files downloaded from ipac:
+	difference images go to --> targetdir/images_refdiff/
+	psf images go to --> targetdir/images_diffpsf/
+
+    ra1, dec1 are the coordinates of the target
+
+    set start_jd = None if you want all images in ZTF history
+
+    set open_check = True, the function will try to opeb all files in the final step.
+    	Sometimes (although very seldom) the fits file can be broken.
     '''
     subdir1 = os.path.dirname(targetdir+'/images_diffpsf/')
     try:
