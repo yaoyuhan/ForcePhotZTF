@@ -28,8 +28,8 @@ DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
 
 
-def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, 
-                                    open_check = False):
+def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None, 
+                                    open_check = True):
     '''
     Download subtracted images and psf images from irsa
 
