@@ -28,8 +28,8 @@ DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
 
 
-def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, 
-                                    open_check = False):
+def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None, 
+                                    open_check = True):
     '''
     Download subtracted images and psf images from irsa
 
@@ -44,6 +44,11 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd,
     set open_check = True, the function will try to opeb all files in the final step.
     	Sometimes (although very seldom) the fits file can be broken.
     '''
+    try:
+        os.stat(targetdir)
+    except:
+        os.mkdir(targetdir) 
+	
     subdir1 = os.path.dirname(targetdir+'/images_diffpsf/')
     try:
         os.stat(subdir1)
