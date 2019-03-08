@@ -4,15 +4,17 @@ This is written for getting the light curves of ZTF transients by forced-PSF pho
 ## Python versions and package dependencies:
 Necessary:
 - python 3.6
-- numpy==1.16.2
-- scipy=1.2.1
-- pandas=0.24.1
-- matplotlib==3.0.3
-- astropy==3.1.2
-- sncosmo==1.7.1
-- ztfquery==1.4.0
-- photutils==0.6
-- image_registration==0.2.4
+- numpy 1.16.2
+- scipy 1.2.1
+- pandas 0.24.1
+- emcee 2.2.1
+- matplotlib 3.0.3
+- astropy 3.1.2
+- sncosmo 1.7.1
+- ztfquery 1.4.0
+- photutils 0.6
+- coner 2.0.1
+- image_registration 0.2.4
 
 Optional:
 - Kowalski==1.0 [link](https://github.com/dmitryduev/kowalski)
