@@ -4,6 +4,7 @@ from astropy.table import Table
 import emcee
 import time
 import glob
+import sys
 import scipy.optimize as op
 from multiprocessing import Queue, Process, Pool
 
@@ -61,13 +62,13 @@ def systematic_lnprob(theta, x, y, yerr):
         return -np.inf
     return lp + systematic_lnlike(theta, x, y, yerr)
 
-def pool_sys_process(tb, i):
-    subtb = tb[tb['index']==i]
-    x = subtb['x'].values
-    y = subtb['y'].values
-    yerr = subtb['ey'].values
+def pool_sys_process(df, i):
+    subdf = df.iloc[np.where(df['index']==i)]
+    x = subdf['x'].values
+    y = subdf['y'].values
+    yerr = subdf['ey'].values
         
-    result = op.minimize(nll, [0, 0, 2], 
+    result = op.minimize(systematic_nll, [0, 0, 2], 
                          method='Powell', args=(x, y, yerr))
     ml_guess = result["x"]
 
@@ -87,15 +88,15 @@ def pool_sys_process(tb, i):
     index = 0
     autocorr = np.empty(max_samples)
     old_tau = np.inf
-    for sample in mix_sampler.sample(pos, iterations=max_samples):
-        if ((mix_sampler.iteration % 250) and 
-            (mix_sampler.iteration < 5000)):
+    for sample in sampler.sample(pos, iterations=max_samples):
+        if ((sampler.iteration % 250) and 
+            (sampler.iteration < 5000)):
             continue
-        elif ((mix_sampler.iteration % 1000) and 
-              (5000 <= mix_sampler.iteration < 15000)):
+        elif ((sampler.iteration % 1000) and 
+              (5000 <= sampler.iteration < 15000)):
             continue
-        elif ((mix_sampler.iteration % 2500) and 
-              (15000 <= mix_sampler.iteration)):
+        elif ((sampler.iteration % 2500) and 
+              (15000 <= sampler.iteration)):
             continue
         tau = sampler.get_autocorr_time(tol=0)
         autocorr[sampler.iteration-1] = np.mean(tau)
@@ -119,11 +120,11 @@ def pool_sys_process(tb, i):
                        amcmc_med, (amcmc_high - amcmc_low)/2.])
     return result
 
-def pool_mix_process(tb, i):
-    subtb = tb[tb['index']==i]
-    x = subtb['x'].values
-    y = subtb['y'].values
-    yerr = subtb['ey'].values
+def pool_mix_process(df, i):
+    subdf = df.iloc[np.where(df['index']==i)]
+    x = subdf['x'].values
+    y = subdf['y'].values
+    yerr = subdf['ey'].values
 
     nwalkers = 250
     ndim = 5
@@ -218,7 +219,7 @@ def get_force_photometry(ztf_name,
     if mixture:
         pool = Pool()
         tstart = time.time()
-        results = [pool.apply_async(pool_mix_process, args=(xy_tbl, i,)) 
+        results = [pool.apply_async(pool_mix_process, args=(xy_df, i,)) 
                    for i in xy_df['index'].unique()]
         output = [p.get() for p in results]
         tend = time.time()
@@ -227,7 +228,7 @@ def get_force_photometry(ztf_name,
     else:
         pool = Pool()
         tstart = time.time()
-        results = [pool.apply_async(pool_process, args=(xy_tbl, i,)) 
+        results = [pool.apply_async(pool_sys_process, args=(xy_df, i,)) 
                    for i in xy_df['index'].unique()]
         output = [p.get() for p in results]
         tend = time.time()
@@ -263,3 +264,7 @@ def get_force_photometry(ztf_name,
     info_df['Fratio_unc'] = Fratio_unc
 
     info_df.to_hdf(info_path + '{}_force_phot.h5'.format(ztf_name), 'lc')
+
+if __name__== "__main__":
+    ztf_name = str(sys.argv[1])
+    get_force_photometry(ztf_name)
