@@ -124,59 +124,30 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = np.nan, seeing_cut = np.na
     plt.savefig(targetdir+name+'_quicklook.pdf')
 
 
-def get_recerence_jds(name, targetdir, partnership=False, iband = False):
+def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = False,
+                      oldsuffix = '_info.fits', newsuffix = '_info_ref.fits', verbose=True):
     print ('Start getting jd of reference exposures for %s'%name)
     s = requests.Session()
+    
     s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
            data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
     
-    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_' + name + '_output1.fits')[1].data)
-    if iband==False:
+    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_' + name + oldsuffix)[1].data)
+    
+    if retain_iband==False:
         ix= np.any([mylc['filter']=='r', mylc['filter']=='g'], axis=0)
         mylc = mylc[ix]
-    ix = mylc['rvalue']!=0
-    mylc = mylc[ix]
     
-    if partnership==True:
+    if only_partnership==True:
         ix = mylc['programid']==2
         mylc = mylc[ix]
-            
-    if 'fieldid' in mylc.colnames:
-        mylc.rename_column('fieldid', 'field') 
-    else:
-        irsaq = pd.read_csv(targetdir+'irsafile.csv')
-        irsa = Table([irsaq['field'].values, irsaq['ccdid'].values, irsaq['fid'].values,
-                      irsaq['qid'].values, irsaq['obsjd'].values], 
-                      names = ['field', 'ccdid', 'fid', 'qid', 'obsjd'])
-        ix = np.any([irsa['fid']==2, irsa['fid']==1], axis=0)
-        irsa = irsa[ix]
-    
-        irsa_jds = np.round(irsa['obsjd'], 7)
-        irsa_fids = irsa['fid'].data
-        irsa_code = irsa_fids*10000000 + irsa_jds
-        irsa['code'] = irsa_code
         
-        mylc_jds = np.round(mylc['jdobs'], 7)
-        mylc_fids = np.zeros(len(mylc), dtype=int)
-        mylc_fids[mylc['filter']=='g']=1
-        mylc_fids[mylc['filter']=='r']=2
-        mylc_code = mylc_fids*10000000 + mylc_jds
-        mylc['filterid'] = mylc_fids
-        mylc['code'] = mylc_code
-    
-        ix = np.in1d(mylc_code, irsa_code)
-        assert np.sum(ix)==len(mylc_code)
-        ix= np.in1d(irsa_code, mylc_code)
-        assert np.sum(ix)==len(mylc_code)
-        ira = irsa[ix]
+    if np.sum(mylc['qid']==99)!=0:
+        if verbose==True:
+            print ('reassign qid based on file name for %s'%(name))
+        mylc['qid'] = [np.int(x.split('_o_q')[1].split('_')[0]) for x in mylc['diffimgname']]
         
-        ira = ira[np.argsort(ira['code'])]
-        mylc = mylc[np.argsort(mylc['code'])]
-        mylc['field'] = ira['field']
-        mylc['ccdid'] = ira['ccdid']
-        mylc['qid'] = ira['qid']
-    
-    mylc['fcqf'] = mylc['field']*10000 + mylc['ccdid']*100 + mylc['qid']*10 + mylc['filterid']
+    mylc['fcqf'] = mylc['fieldid']*10000 + mylc['ccdid']*100 + mylc['qid']*10 + mylc['filterid']
     fcq_uniq = []
     for x in mylc['fcqf']:
         if x not in fcq_uniq:
@@ -220,11 +191,12 @@ def get_recerence_jds(name, targetdir, partnership=False, iband = False):
         ind = mylc['fcqf'] == fcqnow
         jdref_start[ind] = tstart.jd
         jdref_end[ind] = tend.jd
-        print ('fieldid: %d, ccdid: %d, qid: %d, filterid: %d \n \t startjd: %.2f, endjd: %.2f \n'
-               %(fieldnow, ccdidnow, qidnow, filteridnow, tstart.jd, tend.jd))
+        if verbose==True:
+            print ('fieldid: %d, ccdid: %d, qid: %d, filterid: %d \n \t startjd: %.2f, endjd: %.2f \n'
+                   %(fieldnow, ccdidnow, qidnow, filteridnow, tstart.jd, tend.jd))
             
     mylc['jdref_start'] = jdref_start
     mylc['jdref_end'] = jdref_end
         
-    mylc.write(targetdir+'lightcurves/force_phot_' + name + '_output2.fits', 
+    mylc.write(targetdir+'lightcurves/force_phot_' + name + newsuffix, 
                overwrite=True)  

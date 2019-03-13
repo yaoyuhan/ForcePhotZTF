@@ -21,7 +21,7 @@ from photutils import CircularAnnulus
 from image_registration import chi2_shift_iterzoom#, chi2_shift
 
 
-def mylinear_fit(x, y, yerr, npar = 1):
+def mylinear_fit(x, y, yerr, npar = 2):
     '''
     Ref: 
         1. Numerical Recipes, 3rd Edition, p745, 781 - 782
@@ -49,10 +49,10 @@ def mylinear_fit(x, y, yerr, npar = 1):
         a = (Sxx * Sy - Sx * Sxy) / (N * Sxx - Sx**2)
         e_Fpsf = np.sqrt(N**2*Sxx_sigma - 2*N*Sx*Sx_sigma + Sx**2*S_sigma) / (N * Sxx - Sx**2)
         
-    x_mean = np.mean(x)
-    y_mean = np.mean(y)
-    pearson_r = np.sum( (x - x_mean) * (y - y_mean) ) / np.sqrt(np.sum( (x - x_mean)**2 )) / np.sqrt(np.sum( (y - y_mean)**2 ))
-    return Fpsf, e_Fpsf, a, pearson_r
+    # x_mean = np.mean(x)
+    # y_mean = np.mean(y)
+    # pearson_r = np.sum( (x - x_mean) * (y - y_mean) ) / np.sqrt(np.sum( (x - x_mean)**2 )) / np.sqrt(np.sum( (y - y_mean)**2 ))
+    return Fpsf, e_Fpsf, a
 
 
 class ZTFphot(object):
@@ -89,7 +89,8 @@ class ZTFphot(object):
         
         if np.isnan(pixX)==1 or np.isnan(pixY)==1:
             self.status = False
-            print ('Set status to False -- Target outside of image!')
+            if self.verbose==True:
+                print ('Set status to False -- Target outside of image! %s'%(imgpath.split('/')[-1]))
 
         else:
             pixXint = int(np.rint(pixX))
@@ -102,13 +103,16 @@ class ZTFphot(object):
         
             if pixXint<0 or pixYint<0 or pixYint>n_dty or pixXint>n_dtx:
                 self.status = False
-                print ('Set status to False -- Target outside of image!')
+                if self.verbose==True:
+                    print ('Set status to False -- Target outside of image! %s'%(imgpath.split('/')[-1]))
             elif pixXint < r_psf or pixYint < r_psf or pixYint >= (n_dty - r_psf) or pixXint >= (n_dtx - r_psf):
-                print ('Set status to False -- Target on the edge of the image!')
                 self.status = False
+                if self.verbose==True:
+                    print ('Set status to False -- Target on the edge of the image! %s'%(imgpath.split('/')[-1]))
             elif np.sum(small_cutout < bad_threshold) != 0:
                 self.status = False
-                print ('Set status to False -- Bad pixel in the central 3x3 cutout!')
+                if self.verbose==True:
+                    print ('Set status to False -- Bad pixel in the central 3x3 cutout! %s'%(imgpath.split('/')[-1]))
             else:
                 self.status = True
         
@@ -129,8 +133,16 @@ class ZTFphot(object):
             self.qid = hd['QID']
         else:
             self.qid = 99
+            if self.verbose==True:
+                print ('Set qid = 99 since this keyword is not in header: %s'%(imgpath.split('/')[-1]))
+        
         self.filterid = hd['FILTERID']
-            
+        self.moonra = hd['MOONRA']
+        self.moondec = hd['MOONDEC']
+        self.moonillf  = hd['MOONILLF']
+        self.moonphas = hd['MOONPHAS']
+        self.airmass = hd['AIRMASS']
+        
         # load psf cutout
         psf_fn = fits.open(psfpath)[0].data[12-r_psf:12+r_psf+1, 12-r_psf:12+r_psf+1]
         self.psf_fn = psf_fn  
@@ -188,7 +200,7 @@ class ZTFphot(object):
         if scr_fn.shape[0]!=length or scr_fn.shape[1]!=length:
             self.status = False
         
-        if nbad!=0:
+        if nbad!=0 and self.verbose==True:
             print ('%d bad pixels in %d*%d source frame' %(nbad, length, length))
         
         
@@ -204,8 +216,8 @@ class ZTFphot(object):
         xoff, yoff, exoff, eyoff = chi2_shift_iterzoom(psf_fn, scr_fn)
         pixX_cor = pixX + xoff 
         pixY_cor = pixY + yoff 
-        pixel =  np.array([[pixX_cor+1, pixY_cor+1]], np.float_)
-        newcrd = w.wcs_pix2world(pixel, 1)
+        pixel =  np.array([[pixX_cor, pixY_cor]], np.float_)
+        newcrd = w.wcs_pix2world(pixel, 0)
         ra_cor = newcrd[0][0] 
         dec_cor = newcrd[0][1]
         self.ra_cor = ra_cor
@@ -215,6 +227,11 @@ class ZTFphot(object):
     def load_bkg_cutout(self, manual_mask=False, col_mask_start=0, col_mask_end=0,
                         row_mask_start=0, row_mask_end=0):
         '''       
+        You only need to manually mask the background if the number of bad 
+        pixels in the background annulus is more than half of the total;
+        Otherwise median absolute deviation should give a robust estimate of
+        the background noise.
+        
         imgpath = pobj.imgpath
         pixX = pobj.pixX
         pixY = pobj.pixY  
@@ -278,9 +295,10 @@ class ZTFphot(object):
         gain = self.gain
         bkgstd = self.bkgstd
             
-        ind = (scr_fn/gain + bkgstd**2<0)
+        ind = (scr_fn/gain + bkgstd**2)<0
         if np.sum(ind)!=0:
-            print ('%d pixel removed to get positive photometric error' %np.sum(ind))
+            if self.verbose==True:
+                print ('%d pixel removed to get positive photometric error' %np.sum(ind))
             bad_mask[ind] = 1
         
         scr_cor_fn = deepcopy(scr_fn)
@@ -289,6 +307,11 @@ class ZTFphot(object):
         self.scr_cor_fn = scr_cor_fn
         self.bad_mask = bad_mask
         self.nbad = np.sum(bad_mask)
+        
+        _scr_cor_ravel = scr_cor_fn[~bad_mask]
+        _yerrsq = _scr_cor_ravel / gain + bkgstd**2 
+        _yerr = np.sqrt(_yerrsq)
+        self.yerrs = _yerr    
     
         
     def fit_psf(self):
@@ -303,35 +326,29 @@ class ZTFphot(object):
         psf_fn = self.psf_fn  
         scr_cor_fn = self.scr_cor_fn            
         bad_mask = self.bad_mask
-        bkgstd = self.bkgstd
-        gain = self.gain
         # length = self.length
         
         _psf_ravel = psf_fn[~bad_mask]
         _scr_cor_ravel = scr_cor_fn[~bad_mask]
-        _yerrsq = _scr_cor_ravel / gain + bkgstd**2 
-        
-        _yerr = np.sqrt(_yerrsq)
 
-        # one-parameter fit
-        Fpsf, eFpsf, apsf, pearson_r = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar=1)
-        # calculate chi
-        resi = _scr_cor_ravel - _psf_ravel*Fpsf
-        res_over_error = resi/_yerr
-        # plt.plot(resi, 'r')
-        # plt.plot(_yerr, 'k') 
-        chi2 = np.sum(res_over_error**2)
-        chi2_red = chi2 / (len(_psf_ravel)-1)
+        # two-parameter fit --> make initial guess
+        # starting point of the walkders
+        Fpsf_chi2, eFpsf_chi2, apsf_chi2 = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar = 2)
+        initial_guess = np.array([Fpsf_chi2, apsf_chi2, 0])
+        
+        # set up the sampler
+        ndim, nwalkers =3, 100
+        nsteps = 2500
+        pos = [initial_guess + 1e-3*np.random.randn(ndim) for i in range(nwalkers)]
+        
         
         self._psf_ravel = _psf_ravel
         self._scr_cor_ravel = _scr_cor_ravel
         self.Fpsf = Fpsf
         self.eFpsf = eFpsf
         self.apsf = apsf
-        self.r_value = round(pearson_r, 3)   
         self.Fap = np.sum(_scr_cor_ravel)/np.sum(_psf_ravel)
         self.chi2_red = chi2_red
-        self.yerrs = _yerr    
         if self.verbose == True:
             print ('\t Fpsf = %.2f DN, eFpsf = %.2f DN, chi2_red = %.2f'%(self.Fpsf, self.eFpsf, self.chi2_red))
         

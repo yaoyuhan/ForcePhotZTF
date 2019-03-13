@@ -505,7 +505,7 @@ def get_force_lightcurve(name, targetdir,
         img_cutouts = []
         eimg_cutouts = []
     
-    ######################## dalta analysis: ight curve ########################
+    ####################### dalta analysis: light curve #######################
     print ('\n')
     print ('Start fitting forced light curve for %s...'%name)
     for i in range(n):
