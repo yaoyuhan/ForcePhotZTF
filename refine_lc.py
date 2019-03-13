@@ -125,14 +125,14 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = np.nan, seeing_cut = np.na
 
 
 def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = False,
-                      suffix = '_info.fits', verbose=True):
+                      oldsuffix = '_info.fits', newsuffix = '_info_ref.fits', verbose=True):
     print ('Start getting jd of reference exposures for %s'%name)
     s = requests.Session()
     
     s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
            data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
     
-    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_' + name + suffix)[1].data)
+    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_' + name + oldsuffix)[1].data)
     
     if retain_iband==False:
         ix= np.any([mylc['filter']=='r', mylc['filter']=='g'], axis=0)
@@ -198,5 +198,5 @@ def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = Fal
     mylc['jdref_start'] = jdref_start
     mylc['jdref_end'] = jdref_end
         
-    mylc.write(targetdir+'lightcurves/force_phot_' + name + '_info_ref.fits', 
+    mylc.write(targetdir+'lightcurves/force_phot_' + name + newsuffix, 
                overwrite=True)  
