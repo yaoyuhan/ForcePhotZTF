@@ -186,7 +186,7 @@ def pool_mix_process(df, i):
     return result
 
 def get_force_photometry(ztf_name, 
-                         info_path="/projects/p30796/ZTF/early_Ia/2018/info/", 
+                         info_path="/projects/p30796/ZTF/early_Ia/2018/info/",
                          xy_path="/projects/p30796/ZTF/early_Ia/2018/xydata/",
                          mixture=False):
     '''Perform MCMC fit to PSF model to produce forced phot
@@ -267,4 +267,8 @@ def get_force_photometry(ztf_name,
 
 if __name__== "__main__":
     ztf_name = str(sys.argv[1])
-    get_force_photometry(ztf_name)
+    if 2 < len(sys.argv) < 4:
+        get_force_photometry(ztf_name, mixture=True)
+    else:
+        get_force_photometry(ztf_name)
+        
