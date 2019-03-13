@@ -7,7 +7,7 @@ Necessary:
 - numpy 1.16.2
 - scipy 1.2.1
 - pandas 0.24.1
-- emcee 3.0rc2
+- emcee 3.0rc2 [link](https://emcee.readthedocs.io/en/latest/user/install/)
 - matplotlib 3.0.3
 - astropy 3.1.2
 - sncosmo 1.7.1
