@@ -186,8 +186,8 @@ def pool_mix_process(df, i):
     return result
 
 def get_force_photometry(ztf_name, 
-                         info_path="../early_Ia/2018/info/", 
-                         xy_path="../early_Ia/2018/xydata/",
+                         info_path="/projects/p30796/ZTF/early_Ia/2018/info/", 
+                         xy_path="/projects/p30796/ZTF/early_Ia/2018/xydata/",
                          mixture=False):
     '''Perform MCMC fit to PSF model to produce forced phot
                          
@@ -196,10 +196,10 @@ def get_force_photometry(ztf_name,
     ztf_name : str
         Name of the ZTF source that requires forced photometry
     
-    info_path : str (default="../early_Ia/2018/info/")
+    info_path : str (default="/projects/p30796/ZTF/early_Ia/2018/info/")
         file path to the info*fits file for the source
     
-    xy_path : str (default="../early_Ia/2018/xydata/")
+    xy_path : str (default="/projects/p30796/ZTF/early_Ia/2018/xydata/")
         file path to the xy*fits file for the source
     
     mixture : Bool (default=False)
