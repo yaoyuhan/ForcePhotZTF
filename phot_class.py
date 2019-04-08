@@ -20,12 +20,14 @@ from astropy.visualization.mpl_normalize import ImageNormalize
 from photutils import CircularAnnulus
 from image_registration import chi2_shift_iterzoom#, chi2_shift
 
+# ref: https://github.com/Caltech-IPAC/ztf/blob/master/src/pl/perl/forcedphotometry.pl
+
 
 def mylinear_fit(x, y, yerr, npar = 2):
     '''
     Ref: 
         1. Numerical Recipes, 3rd Edition, p745, 781 - 782
-        2. http://web.ipac.caltech.edu/staff/fmasci/ztf/ztf_pipelines_deliverables.pdf, p37
+        2. http://web.ipac.caltech.edu/staff/fmasci/ztf/ztf_pipelines_deliverables.pdf, p38
     '''
     assert len(x) == len(y)
     assert len(y) == len(yerr)
@@ -271,14 +273,18 @@ class ZTFphot(object):
         temp = bkg_fn.ravel()
         temp = temp[~np.isnan(temp)]
         # 20190304: standard deviation is not as robust as median absolute deviation
-        # bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
-        bkgstd = np.median(abs(temp - np.median(temp)))
+        # use the percentile one, to be consistent with Frank's code
+        bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
+        # bkgstd = np.median(abs(temp - np.median(temp)))
+        bkgmed = np.median(temp)
         
         self.bkgstd = bkgstd 
         self.bkg_fn = bkg_fn
+        self.bkgmed = bkgmed
         
         if self.verbose == True:
             print ('\t bkgstd pixel RMS in original diff-image cutout = %.2f DN'%(self.bkgstd))
+            print ('\t bkgmed pixel in original diff-image cutout = %.2f DN'%(self.bkgmed))
         
         
     def get_scr_cor_fn(self):
@@ -289,19 +295,21 @@ class ZTFphot(object):
         psf_fn = pobj.psf_fn
         gain = pobj.gain
         bkgstd = pobj.bkgstd
+        bkgmed = pobj.bkgmed
         '''
         bad_mask = self.bad_mask
         scr_fn = self.scr_fn
         gain = self.gain
         bkgstd = self.bkgstd
+        bkgmed = self.bkgmed
             
+        scr_cor_fn = deepcopy(scr_fn) - bkgmed
         ind = (scr_fn/gain + bkgstd**2)<0
         if np.sum(ind)!=0:
             if self.verbose==True:
                 print ('%d pixel removed to get positive photometric error' %np.sum(ind))
             bad_mask[ind] = 1
         
-        scr_cor_fn = deepcopy(scr_fn)
         scr_cor_fn[bad_mask] = np.nan 
         
         self.scr_cor_fn = scr_cor_fn
@@ -319,34 +327,31 @@ class ZTFphot(object):
         psf_fn = pobj.psf_fn
         scr_cor_fn = pobj.scr_cor_fn
         bad_mask = pobj.bad_mask
-        bkgstd = pobj.bkgstd
-        gain  = pobj.gain
+        yerrs = pobj.yerrs 
         # length = pobj.length
         '''
         psf_fn = self.psf_fn  
         scr_cor_fn = self.scr_cor_fn            
         bad_mask = self.bad_mask
+        yerrs = self.yerrs 
         # length = self.length
         
         _psf_ravel = psf_fn[~bad_mask]
         _scr_cor_ravel = scr_cor_fn[~bad_mask]
 
-        # two-parameter fit --> make initial guess
-        # starting point of the walkders
-        Fpsf_chi2, eFpsf_chi2, apsf_chi2 = mylinear_fit(_psf_ravel, _scr_cor_ravel, _yerr, npar = 2)
-        initial_guess = np.array([Fpsf_chi2, apsf_chi2, 0])
-        
-        # set up the sampler
-        ndim, nwalkers =3, 100
-        nsteps = 2500
-        pos = [initial_guess + 1e-3*np.random.randn(ndim) for i in range(nwalkers)]
-        
+        # one-parameter fit 
+        Fpsf, eFpsf, apsf = mylinear_fit(_psf_ravel, _scr_cor_ravel, yerrs, npar = 1)
+        '''
+        plt.errorbar(_psf_ravel, _scr_cor_ravel, yerrs, fmt='.k')
+        plt.plot(_psf_ravel, Fpsf*_psf_ravel, 'r-')
+        '''
+        dt = (_scr_cor_ravel - Fpsf*_psf_ravel)**2/yerrs**2
+        chi2_red = np.sum(dt) / (len(_psf_ravel)-1)
         
         self._psf_ravel = _psf_ravel
         self._scr_cor_ravel = _scr_cor_ravel
         self.Fpsf = Fpsf
         self.eFpsf = eFpsf
-        self.apsf = apsf
         self.Fap = np.sum(_scr_cor_ravel)/np.sum(_psf_ravel)
         self.chi2_red = chi2_red
         if self.verbose == True:
