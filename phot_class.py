@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from scipy import ndimage
+from scipy.interpolate import Rbf
 from copy import deepcopy
 
 from astropy import wcs
@@ -50,7 +51,6 @@ def mylinear_fit(x, y, yerr, npar = 2):
         Fpsf = (N * Sxy - Sx * Sy) / (N * Sxx - Sx**2)
         a = (Sxx * Sy - Sx * Sxy) / (N * Sxx - Sx**2)
         e_Fpsf = np.sqrt(N**2*Sxx_sigma - 2*N*Sx*Sx_sigma + Sx**2*S_sigma) / (N * Sxx - Sx**2)
-        
     # x_mean = np.mean(x)
     # y_mean = np.mean(y)
     # pearson_r = np.sum( (x - x_mean) * (y - y_mean) ) / np.sqrt(np.sum( (x - x_mean)**2 )) / np.sqrt(np.sum( (y - y_mean)**2 ))
@@ -59,8 +59,8 @@ def mylinear_fit(x, y, yerr, npar = 2):
 
 class ZTFphot(object):
     
-    def __init__(self, name, ra, dec, imgpath, psfpath, bad_threshold=-500, 
-                 r_psf=3, r_bkg_in=10, r_bkg_out=15, verbose=False):
+    def __init__(self, name, ra, dec, imgpath, psfpath,
+                 r_psf=12, r_bkg_in=5, r_bkg_out=15, verbose=False):
         self.name = name
         self.ra = ra
         self.dec = dec
@@ -69,9 +69,11 @@ class ZTFphot(object):
         self.r_psf = r_psf
         self.r_bkg_in = r_bkg_in
         self.r_bkg_out = r_bkg_out
-        self.bad_threshold = bad_threshold
+        self.bad_threshold = -500
         self.length = 2*r_psf + 1
         self.verbose = verbose
+        self.stampupsamplefac = 5
+        self.newlength = self.stampupsamplefac * self.length
     
         hd = fits.open(imgpath)[1].header
         dt = fits.open(imgpath)[1].data
@@ -111,7 +113,7 @@ class ZTFphot(object):
                 self.status = False
                 if self.verbose==True:
                     print ('Set status to False -- Target on the edge of the image! %s'%(imgpath.split('/')[-1]))
-            elif np.sum(small_cutout < bad_threshold) != 0:
+            elif np.sum(small_cutout < self.bad_threshold) != 0:
                 self.status = False
                 if self.verbose==True:
                     print ('Set status to False -- Bad pixel in the central 3x3 cutout! %s'%(imgpath.split('/')[-1]))
@@ -148,11 +150,48 @@ class ZTFphot(object):
         # load psf cutout
         psf_fn = fits.open(psfpath)[0].data[12-r_psf:12+r_psf+1, 12-r_psf:12+r_psf+1]
         self.psf_fn = psf_fn  
+        # upsample PSF using Gaussian interpolation
+        self.upsample_psf_fn()
         
         # print out infomation
         if self.verbose == True:
             print ('processing record for %s'%self.imgpath)
             print ('\t gain=%.2f, diff_zp = %.4f'%(self.gain, self.zp))
+            
+            
+    def upsample_psf_fn(self):
+        '''
+        length = pobj.length
+        stampupsamplefac = pobj.stampupsamplefac
+        psf_fn = pobj.psf_fn
+        '''
+        length = self.length
+        psf_fn = self.psf_fn
+        stampupsamplefac = self.stampupsamplefac
+        
+        # regularize input difference-image PSF (replace negative pixels with zero);
+        ix = psf_fn < 0.
+        psf_fn[ix] = 0.
+        
+        # newlength = stampupsamplefac * length
+        upstep = 1./stampupsamplefac
+        
+        x_coarse, y_coarse = np.mgrid[0:length, 0:length]
+        x_fine, y_fine = np.mgrid[0:length:upstep, 0:length:upstep]
+        
+        rbfi = Rbf(x_coarse.ravel(), y_coarse.ravel(), psf_fn.ravel(), function="gaussian")
+        # interpolated psf frame
+        fine_psf_fn = rbfi(x_fine.ravel(), y_fine.ravel()).reshape([x_fine.shape[0], 
+                                                                    y_fine.shape[0]])
+        # renormalize to unity
+        fine_psf_fn /= np.sum(fine_psf_fn)
+        # in the case that r_psf < 12
+        fine_psf_fn *= np.sum(psf_fn) 
+        self.fine_psf_fn = fine_psf_fn
+        # norm = ImageNormalize(stretch=SqrtStretch())
+        # plt.imshow(psf_fn, norm = norm)
+        # norm2 = ImageNormalize(stretch=SqrtStretch())
+        # plt.imshow(interp_psf_fn*25, norm=norm)
             
         
     def load_source_cutout(self):
@@ -162,7 +201,7 @@ class ZTFphot(object):
         pixY = pobj.pixY        
         pixXint = pobj.pixXint
         pixYint = pobj.pixYint
-        bad_threshold = pobj.bad_threshold
+        #bad_threshold = pobj.bad_threshold
         n_dty = pobj.n_dty
         n_dtx = pobj.n_dtx
         r_psf = pobj.r_psf
@@ -173,10 +212,12 @@ class ZTFphot(object):
         pixY = self.pixY        
         pixXint = self.pixXint
         pixYint = self.pixYint
-        bad_threshold = self.bad_threshold
+        #bad_threshold = self.bad_threshold
         n_dty = self.n_dty
         r_psf = self.r_psf
         length = self.length
+        stampupsamplefac = self.stampupsamplefac
+        newlength = self.newlength
         # n_dtx = self.n_dtx
         
         dt = fits.open(imgpath)[1].data  
@@ -190,16 +231,26 @@ class ZTFphot(object):
         yoff_tobe = pixY - pixYint
         scr_fn_ = ndimage.shift(scr_fn_1, [-yoff_tobe, -xoff_tobe], order=3, 
                                 mode='reflect', cval=0.0, prefilter=True)
-        scr_fn = scr_fn_[1:-1, 1:-1]      
+        scr_fn = scr_fn_[1:-1, 1:-1] 
         
-        bad_mask = scr_fn <= bad_threshold
+        # upsample input difference image stamp by simply rebinning
+        # and ensuring sum of pixel fluxes is conserved.
+        fine_scr_fn = scr_fn.repeat(stampupsamplefac, axis = 0).repeat(stampupsamplefac, axis = 1)
+        fine_scr_fn /= stampupsamplefac**2
+        # assert np.sum(fine_scr_fn)==np.sum(scr_fn)
+        
+        # norm = ImageNormalize(stretch=SqrtStretch())
+        # plt.imshow(scr_fn, norm = norm)
+        # norm2 = ImageNormalize(stretch=SqrtStretch())
+        # plt.imshow(fine_scr_fn*25, norm=norm)
+        
+        bad_mask = np.isnan(scr_fn)
         nbad = np.sum(bad_mask)
-        scr_fn[bad_mask] = np.nan
-        self.bad_mask = bad_mask
         self.nbad = nbad
         self.scr_fn = scr_fn
+        self.fine_scr_fn = fine_scr_fn
         
-        if scr_fn.shape[0]!=length or scr_fn.shape[1]!=length:
+        if fine_scr_fn.shape[0]!=newlength or fine_scr_fn.shape[1]!=newlength:
             self.status = False
         
         if nbad!=0 and self.verbose==True:
@@ -229,22 +280,22 @@ class ZTFphot(object):
     def load_bkg_cutout(self, manual_mask=False, col_mask_start=0, col_mask_end=0,
                         row_mask_start=0, row_mask_end=0):
         '''       
-        You only need to manually mask the background if the number of bad 
+        Only need to manually mask the background if the number of bad 
         pixels in the background annulus is more than half of the total;
-        Otherwise median absolute deviation should give a robust estimate of
-        the background noise.
+        Otherwise *median absolute deviation*(or percentiles) should give a 
+        robust estimate of the background noise.
         
         imgpath = pobj.imgpath
         pixX = pobj.pixX
         pixY = pobj.pixY  
-        bad_threshold = pobj.bad_threshold
+        # bad_threshold = pobj.bad_threshold
         r_bkg_in = pobj.r_bkg_in
         r_bkg_out = pobj.r_bkg_out
         '''
         imgpath = self.imgpath              
         pixX = self.pixX
         pixY = self.pixY
-        bad_threshold = self.bad_threshold
+        # bad_threshold = self.bad_threshold
         r_bkg_in = self.r_bkg_in
         r_bkg_out = self.r_bkg_out
         
@@ -256,24 +307,20 @@ class ZTFphot(object):
         annulus_data = annulus_masks[0].multiply(dt)
         
         bkg_fn = deepcopy(annulus_data)
-        bad_bkg_mask = annulus_data <= bad_threshold
+        bad_bkg_mask = np.isnan(annulus_data)
         if manual_mask == True:    
             bad_bkg_mask[r_bkg_out+row_mask_start:r_bkg_out+row_mask_end, 
                          r_bkg_out+col_mask_start:r_bkg_out+col_mask_end] = True
-        bkg_fn[bad_bkg_mask] = np.nan
         nbad_bkg = np.sum(bad_bkg_mask)
             
-        self.bad_bkg_mask = bad_bkg_mask
         self.nbad_bkg = nbad_bkg
         
         setnan = annulus_masks[0].data==0
         bkg_fn[setnan] = np.nan
-        bkgstd = np.nanstd(bkg_fn) 
+        # bkgstd = np.nanstd(bkg_fn) 
         
         temp = bkg_fn.ravel()
         temp = temp[~np.isnan(temp)]
-        # 20190304: standard deviation is not as robust as median absolute deviation
-        # use the percentile one, to be consistent with Frank's code
         bkgstd = 0.5 * (np.percentile(temp, 84.13)-np.percentile(temp, 15.86))
         # bkgstd = np.median(abs(temp - np.median(temp)))
         bkgmed = np.median(temp)
@@ -287,72 +334,74 @@ class ZTFphot(object):
             print ('\t bkgmed pixel in original diff-image cutout = %.2f DN'%(self.bkgmed))
         
         
-    def get_scr_cor_fn(self):
+    def get_fine_scr_cor_fn(self):
         '''
-        psf_fn = pobj.psf_fn
-        bad_mask = pobj.bad_mask
-        scr_fn = pobj.scr_fn
-        psf_fn = pobj.psf_fn
+        fine_scr_fn = pobj.fine_scr_fn
+        fine_psf_fn = pobj.fine_psf_fn
         gain = pobj.gain
         bkgstd = pobj.bkgstd
         bkgmed = pobj.bkgmed
+        stampupsamplefac = pobj.stampupsamplefac
         '''
-        bad_mask = self.bad_mask
-        scr_fn = self.scr_fn
+        fine_scr_fn = self.fine_scr_fn
+        fine_psf_fn = self.fine_psf_fn
         gain = self.gain
         bkgstd = self.bkgstd
         bkgmed = self.bkgmed
+        stampupsamplefac = self.stampupsamplefac
             
-        scr_cor_fn = deepcopy(scr_fn) - bkgmed
-        ind = (scr_fn/gain + bkgstd**2)<0
-        if np.sum(ind)!=0:
-            if self.verbose==True:
-                print ('%d pixel removed to get positive photometric error' %np.sum(ind))
-            bad_mask[ind] = 1
+        bkgmedupsamp = bkgmed/stampupsamplefac**2
+        fine_scr_cor_fn = deepcopy(fine_scr_fn) - bkgmedupsamp
+        fine_bad_mask = np.isnan(fine_scr_cor_fn)
         
-        scr_cor_fn[bad_mask] = np.nan 
+        #--------
+        # compute variance map for upsampled diff-image pixels used for photometry.
+        bkgstdupsamp = bkgstd/stampupsamplefac
+        fine_scr_cor_pos_fn = deepcopy(fine_scr_cor_fn)
+        ix= fine_scr_cor_pos_fn < 0.
+        fine_scr_cor_pos_fn[ix] = 0
         
-        self.scr_cor_fn = scr_cor_fn
-        self.bad_mask = bad_mask
-        self.nbad = np.sum(bad_mask)
+        fine_scr_cor_var_fn = fine_scr_cor_pos_fn/gain + bkgstdupsamp**2
         
-        _scr_cor_ravel = scr_cor_fn[~bad_mask]
-        _yerrsq = _scr_cor_ravel / gain + bkgstd**2 
+        self.fine_scr_cor_fn = fine_scr_cor_fn
+        self.fine_bad_mask = fine_bad_mask
+        self.nbadfine = np.sum(fine_bad_mask)
+        
+        _fine_scr_cor_ravel = fine_scr_cor_fn[~fine_bad_mask]
+        _yerrsq = fine_scr_cor_var_fn[~fine_bad_mask]
         _yerr = np.sqrt(_yerrsq)
         self.yerrs = _yerr    
+        self.y = _fine_scr_cor_ravel
+        self.x = fine_psf_fn[~fine_bad_mask]
     
         
     def fit_psf(self):
         '''
-        psf_fn = pobj.psf_fn
-        scr_cor_fn = pobj.scr_cor_fn
-        bad_mask = pobj.bad_mask
+        x = pobj.x
+        y = pobj.y
         yerrs = pobj.yerrs 
-        # length = pobj.length
+        stampupsamplefac = pobj.stampupsamplefac
         '''
-        psf_fn = self.psf_fn  
-        scr_cor_fn = self.scr_cor_fn            
-        bad_mask = self.bad_mask
+        x = self.x
+        y = self.y
         yerrs = self.yerrs 
-        # length = self.length
-        
-        _psf_ravel = psf_fn[~bad_mask]
-        _scr_cor_ravel = scr_cor_fn[~bad_mask]
+        stampupsamplefac = self.stampupsamplefac
 
         # one-parameter fit 
-        Fpsf, eFpsf, apsf = mylinear_fit(_psf_ravel, _scr_cor_ravel, yerrs, npar = 1)
+        Fpsf, eFpsf, apsf = mylinear_fit(x, y, yerrs, npar = 1)
         '''
-        plt.errorbar(_psf_ravel, _scr_cor_ravel, yerrs, fmt='.k')
-        plt.plot(_psf_ravel, Fpsf*_psf_ravel, 'r-')
+        plt.errorbar(x, y, yerrs, fmt='.k')
+        plt.plot(x, Fpsf*x, 'r-')
         '''
-        dt = (_scr_cor_ravel - Fpsf*_psf_ravel)**2/yerrs**2
-        chi2_red = np.sum(dt) / (len(_psf_ravel)-1)
         
-        self._psf_ravel = _psf_ravel
-        self._scr_cor_ravel = _scr_cor_ravel
+        #--------
+        # compute reduced chi-square for PSF-fit.
+        chi2 = (y - Fpsf*x)**2/yerrs**2
+        chi2_red = np.sum(chi2) / (len(x)/stampupsamplefac**2-1)
+        
         self.Fpsf = Fpsf
         self.eFpsf = eFpsf
-        self.Fap = np.sum(_scr_cor_ravel)/np.sum(_psf_ravel)
+        self.Fap = np.sum(y)/np.sum(x)
         self.chi2_red = chi2_red
         if self.verbose == True:
             print ('\t Fpsf = %.2f DN, eFpsf = %.2f DN, chi2_red = %.2f'%(self.Fpsf, self.eFpsf, self.chi2_red))
@@ -360,39 +409,42 @@ class ZTFphot(object):
         
     def plot_cutouts(self, savepath=None):
         '''
-        scr_fn = pobj.scr_fn
-        _scr_cor_ravel = pobj._scr_cor_ravel
-        scr_cor_fn = pobj.scr_cor_fn
-        psf_fn = pobj.psf_fn
+        x = pobj.x
+        y = pobj.y
+        Fpsf = pobj.Fpsf
+        fine_scr_cor_fn = pobj.fine_scr_cor_fn
+        fine_psf_fn= pobj.fine_psf_fn
         Fpsf = pobj.Fpsf
         eFpsf = pobj.eFpsf
-        bad_mask = pobj.bad_mask
+        fine_bad_mask = pobj.fine_bad_mask
         filtername = pobj.filter
         bkg_fn = pobj.bkg_fn
         seeing = pobj.seeing
-        length = pobj.length
+        # length = pobj.length
         yerrs = pobj.yerrs
         chi2_red = pobj.chi2_red
+        stampupsamplefac = pobj.stampupsamplefac
         '''
         cmap_name = 'viridis'
         
         # scr_fn = self.scr_fn
-        _scr_cor_ravel = self._scr_cor_ravel
-        scr_cor_fn = self.scr_cor_fn
-        psf_fn= self.psf_fn
+        x = self.x
+        y = self.y
+        Fpsf = self.Fpsf
+        fine_scr_cor_fn = self.fine_scr_cor_fn
+        fine_psf_fn= self.fine_psf_fn
         Fpsf = self.Fpsf
         eFpsf = self.eFpsf
-        bad_mask = self.bad_mask
+        # fine_bad_mask = self.fine_bad_mask
         filtername = self.filter
         bkg_fn = self.bkg_fn
         seeing = self.seeing
         # length = self.length
         yerrs = self.yerrs
         chi2_red = self.chi2_red
+        stampupsamplefac = self.stampupsamplefac
         
-        model_fn = psf_fn*Fpsf
-        _model_ravel = model_fn[~bad_mask]
-        _psf_ravel = psf_fn[~bad_mask]
+        model_fn = fine_psf_fn*Fpsf
     
         fig, ax = plt.subplots(4, 4, figsize=(9, 9))
         matplotlib.rcParams.update({'font.size': 15})
@@ -405,15 +457,16 @@ class ZTFphot(object):
             ax[0,0].set_axis_off()
         '''
         norm2 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,0].imshow(scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,0].imshow(fine_scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
         ax[0,0].set_title('Data, '+filtername, fontsize=15)
         ax[0,1].imshow(model_fn, cmap = cmap_name, origin='lower', norm=norm2)
         ax[0,1].set_title('PSF model', fontsize=15)
-        ax[0,3].imshow(bkg_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        normnew = ImageNormalize(stretch=SqrtStretch())
+        ax[0,3].imshow(bkg_fn, cmap = cmap_name, origin='lower', norm=normnew)
         ax[0,3].set_title('Background', fontsize=15)
         
         norm1 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,2].imshow(scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
+        ax[0,2].imshow(fine_scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
         ax[0,2].set_title('Residual', fontsize=15)
         ax[0][0].set_xticklabels([])
         ax[0][0].set_yticklabels([])
@@ -429,9 +482,9 @@ class ZTFphot(object):
         ax[0,3].tick_params(axis='both', which='both', direction='in')
         
         ax4 = plt.subplot2grid((4, 1), (1, 0), rowspan=2)
-        ax4.errorbar(_psf_ravel, _scr_cor_ravel, yerrs, fmt='.k')
-        xx = np.array([np.min(_psf_ravel), np.max(_psf_ravel)])
-        ax4.plot(xx, Fpsf*xx, 'r-')
+        ax4.errorbar(x, y, yerrs/stampupsamplefac, fmt='.k', zorder=1)
+        xx = np.array([np.min(x), np.max(x)])
+        ax4.plot(xx, Fpsf*xx, 'r-', zorder=2)
         ax4.tick_params(axis='both', which='both', direction='in')
         # ax4.set_xlim(0-1, length**2+1)
 
@@ -445,8 +498,8 @@ class ZTFphot(object):
         plt.text(xx.mean() ,yloc3, 'chi2_red = %.3f'%chi2_red, fontsize=15, color='m')
         
         ax5 = plt.subplot2grid((4, 1), (3, 0))
-        ax5.errorbar(_psf_ravel, _scr_cor_ravel-_model_ravel, yerrs, fmt='.k')
-        plt.plot(xx, [0,0], color='grey', linewidth = 2, alpha= 0.5)
+        ax5.errorbar(x, y -Fpsf*x, yerrs/stampupsamplefac, fmt='.k', zorder=1)
+        plt.plot(xx, [0,0], color='grey', linewidth = 2, alpha= 0.5, zorder=2)
         ax5.tick_params(axis='both', which='both', direction='in')
         
         plt.tight_layout()
