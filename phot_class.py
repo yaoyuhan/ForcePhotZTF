@@ -19,7 +19,7 @@ from astropy.visualization import SqrtStretch
 from astropy.visualization.mpl_normalize import ImageNormalize
 
 from photutils import CircularAnnulus
-from image_registration import chi2_shift_iterzoom#, chi2_shift
+#from image_registration import chi2_shift_iterzoom#, chi2_shift
 
 # ref: https://github.com/Caltech-IPAC/ztf/blob/master/src/pl/perl/forcedphotometry.pl
 
@@ -72,8 +72,8 @@ class ZTFphot(object):
         self.bad_threshold = -500
         self.length = 2*r_psf + 1
         self.verbose = verbose
-        self.stampupsamplefac = 5
-        self.newlength = self.stampupsamplefac * self.length
+        # self.stampupsamplefac = 5
+        # self.newlength = self.stampupsamplefac * self.length
     
         hd = fits.open(imgpath)[1].header
         dt = fits.open(imgpath)[1].data
@@ -81,7 +81,7 @@ class ZTFphot(object):
         n_dtx = dt.shape[1]
         w = wcs.WCS(hd)
         world =  np.array([[ra, dec]], np.float_)
-        pixcrd = w.wcs_world2pix(world, 0)
+        pixcrd = w.wcs_world2pix(world, 0) # in python language
         pixX = pixcrd[0, 0]
         pixY = pixcrd[0, 1]
         
@@ -151,20 +151,20 @@ class ZTFphot(object):
         psf_fn = fits.open(psfpath)[0].data[12-r_psf:12+r_psf+1, 12-r_psf:12+r_psf+1]
         self.psf_fn = psf_fn  
         # upsample PSF using Gaussian interpolation
-        self.upsample_psf_fn()
+        # self.upsample_psf_fn()
         
         # print out infomation
         if self.verbose == True:
             print ('processing record for %s'%self.imgpath)
             print ('\t gain=%.2f, diff_zp = %.4f'%(self.gain, self.zp))
             
-            
+    '''
     def upsample_psf_fn(self):
-        '''
-        length = pobj.length
-        stampupsamplefac = pobj.stampupsamplefac
-        psf_fn = pobj.psf_fn
-        '''
+        
+        #length = pobj.length
+        #stampupsamplefac = pobj.stampupsamplefac
+        #psf_fn = pobj.psf_fn
+        
         length = self.length
         psf_fn = self.psf_fn
         stampupsamplefac = self.stampupsamplefac
@@ -192,7 +192,7 @@ class ZTFphot(object):
         # plt.imshow(psf_fn, norm = norm)
         # norm2 = ImageNormalize(stretch=SqrtStretch())
         # plt.imshow(interp_psf_fn*25, norm=norm)
-            
+    '''      
         
     def load_source_cutout(self):
         '''
@@ -212,12 +212,12 @@ class ZTFphot(object):
         pixY = self.pixY        
         pixXint = self.pixXint
         pixYint = self.pixYint
-        #bad_threshold = self.bad_threshold
+        bad_threshold = self.bad_threshold
         n_dty = self.n_dty
         r_psf = self.r_psf
         length = self.length
-        stampupsamplefac = self.stampupsamplefac
-        newlength = self.newlength
+        #stampupsamplefac = self.stampupsamplefac
+        # newlength = self.newlength
         # n_dtx = self.n_dtx
         
         dt = fits.open(imgpath)[1].data  
@@ -229,10 +229,12 @@ class ZTFphot(object):
                       pixXint - r_psf - 1 : pixXint + r_psf + 2]
         xoff_tobe = pixX - pixXint
         yoff_tobe = pixY - pixYint
+        
         scr_fn_ = ndimage.shift(scr_fn_1, [-yoff_tobe, -xoff_tobe], order=3, 
                                 mode='reflect', cval=0.0, prefilter=True)
         scr_fn = scr_fn_[1:-1, 1:-1] 
         
+        '''
         # upsample input difference image stamp by simply rebinning
         # and ensuring sum of pixel fluxes is conserved.
         fine_scr_fn = scr_fn.repeat(stampupsamplefac, axis = 0).repeat(stampupsamplefac, axis = 1)
@@ -243,20 +245,22 @@ class ZTFphot(object):
         # plt.imshow(scr_fn, norm = norm)
         # norm2 = ImageNormalize(stretch=SqrtStretch())
         # plt.imshow(fine_scr_fn*25, norm=norm)
-        
+        '''
         bad_mask = np.isnan(scr_fn)
+        ix = scr_fn < bad_threshold
+        bad_mask[ix] = True
         nbad = np.sum(bad_mask)
         self.nbad = nbad
         self.scr_fn = scr_fn
-        self.fine_scr_fn = fine_scr_fn
+        self.bad_mask = bad_mask
+        # self.fine_scr_fn = fine_scr_fn
         
-        if fine_scr_fn.shape[0]!=newlength or fine_scr_fn.shape[1]!=newlength:
+        if scr_fn.shape[0]!=length or scr_fn.shape[1]!=length:
             self.status = False
         
         if nbad!=0 and self.verbose==True:
             print ('%d bad pixels in %d*%d source frame' %(nbad, length, length))
-        
-        
+    ''' 
     def find_optimal_coo(self):
         psf_fn = self.psf_fn
         scr_fn = self.scr_fn
@@ -275,7 +279,8 @@ class ZTFphot(object):
         dec_cor = newcrd[0][1]
         self.ra_cor = ra_cor
         self.dec_cor = dec_cor
-        
+    '''
+    
         
     def load_bkg_cutout(self, manual_mask=False, col_mask_start=0, col_mask_end=0,
                         row_mask_start=0, row_mask_end=0):
@@ -334,7 +339,7 @@ class ZTFphot(object):
             print ('\t bkgmed pixel in original diff-image cutout = %.2f DN'%(self.bkgmed))
         
         
-    def get_fine_scr_cor_fn(self):
+    def get_scr_cor_fn(self):
         '''
         fine_scr_fn = pobj.fine_scr_fn
         fine_psf_fn = pobj.fine_psf_fn
@@ -343,36 +348,31 @@ class ZTFphot(object):
         bkgmed = pobj.bkgmed
         stampupsamplefac = pobj.stampupsamplefac
         '''
-        fine_scr_fn = self.fine_scr_fn
-        fine_psf_fn = self.fine_psf_fn
+        scr_fn = self.scr_fn
+        psf_fn = self.psf_fn
         gain = self.gain
         bkgstd = self.bkgstd
         bkgmed = self.bkgmed
-        stampupsamplefac = self.stampupsamplefac
+        bad_mask = self.bad_mask
             
-        bkgmedupsamp = bkgmed/stampupsamplefac**2
-        fine_scr_cor_fn = deepcopy(fine_scr_fn) - bkgmedupsamp
-        fine_bad_mask = np.isnan(fine_scr_cor_fn)
+        scr_cor_fn = deepcopy(scr_fn) - bkgmed
         
         #--------
         # compute variance map for upsampled diff-image pixels used for photometry.
-        bkgstdupsamp = bkgstd/stampupsamplefac
-        fine_scr_cor_pos_fn = deepcopy(fine_scr_cor_fn)
-        ix= fine_scr_cor_pos_fn < 0.
-        fine_scr_cor_pos_fn[ix] = 0
+        scr_cor_pos_fn = deepcopy(scr_cor_fn)
+        ix= scr_cor_pos_fn < 0.
+        scr_cor_pos_fn[ix] = 0
         
-        fine_scr_cor_var_fn = fine_scr_cor_pos_fn/gain + bkgstdupsamp**2
+        scr_cor_var_fn = scr_cor_pos_fn/gain + bkgstd**2
         
-        self.fine_scr_cor_fn = fine_scr_cor_fn
-        self.fine_bad_mask = fine_bad_mask
-        self.nbadfine = np.sum(fine_bad_mask)
+        self.scr_cor_fn = scr_cor_fn
         
-        _fine_scr_cor_ravel = fine_scr_cor_fn[~fine_bad_mask]
-        _yerrsq = fine_scr_cor_var_fn[~fine_bad_mask]
+        _scr_cor_ravel = scr_cor_fn[~bad_mask]
+        _yerrsq = scr_cor_var_fn[~bad_mask]
         _yerr = np.sqrt(_yerrsq)
         self.yerrs = _yerr    
-        self.y = _fine_scr_cor_ravel
-        self.x = fine_psf_fn[~fine_bad_mask]
+        self.y = _scr_cor_ravel
+        self.x = psf_fn[~bad_mask]
     
         
     def fit_psf(self):
@@ -385,8 +385,7 @@ class ZTFphot(object):
         x = self.x
         y = self.y
         yerrs = self.yerrs 
-        stampupsamplefac = self.stampupsamplefac
-
+        
         # one-parameter fit 
         Fpsf, eFpsf, apsf = mylinear_fit(x, y, yerrs, npar = 1)
         '''
@@ -397,7 +396,7 @@ class ZTFphot(object):
         #--------
         # compute reduced chi-square for PSF-fit.
         chi2 = (y - Fpsf*x)**2/yerrs**2
-        chi2_red = np.sum(chi2) / (len(x)/stampupsamplefac**2-1)
+        chi2_red = np.sum(chi2) / (len(x)-1)
         
         self.Fpsf = Fpsf
         self.eFpsf = eFpsf
@@ -431,8 +430,8 @@ class ZTFphot(object):
         x = self.x
         y = self.y
         Fpsf = self.Fpsf
-        fine_scr_cor_fn = self.fine_scr_cor_fn
-        fine_psf_fn= self.fine_psf_fn
+        scr_cor_fn = self.scr_cor_fn
+        psf_fn= self.psf_fn
         Fpsf = self.Fpsf
         eFpsf = self.eFpsf
         # fine_bad_mask = self.fine_bad_mask
@@ -442,9 +441,8 @@ class ZTFphot(object):
         # length = self.length
         yerrs = self.yerrs
         chi2_red = self.chi2_red
-        stampupsamplefac = self.stampupsamplefac
         
-        model_fn = fine_psf_fn*Fpsf
+        model_fn = psf_fn*Fpsf
     
         fig, ax = plt.subplots(4, 4, figsize=(9, 9))
         matplotlib.rcParams.update({'font.size': 15})
@@ -457,7 +455,7 @@ class ZTFphot(object):
             ax[0,0].set_axis_off()
         '''
         norm2 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,0].imshow(fine_scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
+        ax[0,0].imshow(scr_cor_fn, cmap = cmap_name, origin='lower', norm=norm2)
         ax[0,0].set_title('Data, '+filtername, fontsize=15)
         ax[0,1].imshow(model_fn, cmap = cmap_name, origin='lower', norm=norm2)
         ax[0,1].set_title('PSF model', fontsize=15)
@@ -466,7 +464,7 @@ class ZTFphot(object):
         ax[0,3].set_title('Background', fontsize=15)
         
         norm1 = ImageNormalize(stretch=SqrtStretch())
-        ax[0,2].imshow(fine_scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
+        ax[0,2].imshow(scr_cor_fn-model_fn, cmap = cmap_name, origin='lower', norm=norm1)
         ax[0,2].set_title('Residual', fontsize=15)
         ax[0][0].set_xticklabels([])
         ax[0][0].set_yticklabels([])
@@ -482,7 +480,7 @@ class ZTFphot(object):
         ax[0,3].tick_params(axis='both', which='both', direction='in')
         
         ax4 = plt.subplot2grid((4, 1), (1, 0), rowspan=2)
-        ax4.errorbar(x, y, yerrs/stampupsamplefac, fmt='.k', zorder=1)
+        ax4.errorbar(x, y, yerrs, fmt='.k', zorder=1)
         xx = np.array([np.min(x), np.max(x)])
         ax4.plot(xx, Fpsf*xx, 'r-', zorder=2)
         ax4.tick_params(axis='both', which='both', direction='in')
@@ -498,7 +496,7 @@ class ZTFphot(object):
         plt.text(xx.mean() ,yloc3, 'chi2_red = %.3f'%chi2_red, fontsize=15, color='m')
         
         ax5 = plt.subplot2grid((4, 1), (3, 0))
-        ax5.errorbar(x, y -Fpsf*x, yerrs/stampupsamplefac, fmt='.k', zorder=1)
+        ax5.errorbar(x, y -Fpsf*x, yerrs, fmt='.k', zorder=1)
         plt.plot(xx, [0,0], color='grey', linewidth = 2, alpha= 0.5, zorder=2)
         ax5.tick_params(axis='both', which='both', direction='in')
         
