@@ -8,8 +8,7 @@ Created on Thu Dec 27 17:11:41 2018
 import os
 
 __all__ = ['force_lc',
-           'compare_lc',
-           'refine_coo',
+           'force_mcmc',
            'phot_class',
            'keypairs',
            'salt2_fit']
