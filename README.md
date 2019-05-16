@@ -36,16 +36,3 @@ You need to provide your username and password (save them to a file) in the form
 
 ## How to use this package.
 Please see demo.ipynb
-
-## Upcoming version
-I'm thinking about using MCMC to estimate the fitting slope. 
-
-## Scripts not relavant to forced-PSF photometry, but might be useful:
-#### reference.py 
-
-This is a demo of how to download marshal lightcurves without using ztfquery, and get reference image epochs from Kowalski or IPAC. Reference image epochs are important since you may want to make sure that no supernova light is in the reference images.
-
-#### snid_run.py
-
-This is a demo of how to automatically run SNID on Caltech computer pharos (and thus written in python 2). 
-Please see here https://people.lam.fr/blondin.stephane/software/snid/howto.html for other options.
