@@ -10,7 +10,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from scipy import ndimage
-from scipy.interpolate import Rbf
 from copy import deepcopy
 
 from astropy import wcs
@@ -60,7 +59,7 @@ def mylinear_fit(x, y, yerr, npar = 2):
 class ZTFphot(object):
     
     def __init__(self, name, ra, dec, imgpath, psfpath,
-                 r_psf=12, r_bkg_in=5, r_bkg_out=15, verbose=False):
+                 r_psf=3, r_bkg_in=10, r_bkg_out=15, verbose=False):
         self.name = name
         self.ra = ra
         self.dec = dec

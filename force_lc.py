@@ -13,19 +13,24 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
-from astropy.io import fits
 import astropy.io.ascii as asci
+from astropy.io import fits
+from astropy import units as u
 from astropy.table import Table
+from astropy.coordinates import SkyCoord
 
 from ztfquery import query
+from ztfquery import marshal
 from ztfquery.io import download_single_url
+
+from penquins import Kowalski
 
 from ForcePhotZTF.keypairs import get_keypairs
 from ForcePhotZTF.phot_class import ZTFphot
-from ForcePhotZTF.refine_coo import get_refined_coord, get_pos
 
 DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
+DEFAULT_AUTH_kowalski = DEFAULT_AUTHs[1]
 
 
 def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None, 
@@ -43,6 +48,17 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None,
 
     set open_check = True, the function will try to opeb all files in the final step.
     	Sometimes (although very seldom) the fits file can be broken.
+        
+    Outputs:
+    --------
+    `targetdir/images_refdiff/`: [directory]
+        contains difference images on which PSF photometry is performed
+        
+    `targetdir/images_diffpsf/`: [directory]
+        contains images with psf models on each epoch
+        
+    `targetdir/irsafile.csv` & `targetdir/missingdata.txt`: [file]
+        by-products in the process of downloading from irsa
     '''
     try:
         os.stat(targetdir)
@@ -171,6 +187,14 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None,
 def download_marshal_lightcurve(name, targetdir):
     '''
     download the marshal lightcurve and plot it, save the figure to targetdir
+    
+    Outputs:
+    --------
+    `targetdir/lightcurves/marshal_lightcurve_ZTFname.csv`: [file]
+        marshal lightcurve csv file
+        
+    `targetdir/marshal_lc_plotZTFname.png`: [file]
+        marshal lightcurve plot
     '''
     try:
         os.stat(targetdir)
@@ -263,82 +287,136 @@ def download_marshal_lightcurve(name, targetdir):
     plt.close()   
     
 
-def prepare_forced_phot(name, targetdir = 'default',
-                        before_marshal_detection = None,
-                        detection_jd = None, recenter_coo = True,
-                        ndays_before_peak = 8, ndays_after_peak = 10,
-                        open_check = False):
+def get_pos(name):
+    """
+    Get position of target
+    """
+    m = marshal.MarshalAccess()
+    m.load_target_sources()
+    coords = m.get_target_coordinates(name)
+    ra = coords.ra.values[0]
+    dec = coords.dec.values[0]
+    return ra, dec
+
+
+def astrometry_spread(name, targetdir):
+    ra1, dec1 = np.loadtxt(targetdir+'coo_marshal.reg') 
+    ra2, dec2 = np.loadtxt(targetdir+'coo_kowalski.reg') 
+    
+    tb_alerts = pd.read_csv(targetdir+'alert_coo.csv')
+    
+    radius = 0.1
+    fontsize = 12
+    c1 = SkyCoord(ra = ra1, dec = dec1, unit = 'degree')
+    c2 = SkyCoord(ra = ra2, dec = dec2, unit = 'degree')
+    coords = SkyCoord(ra = tb_alerts['ra'].values, dec = tb_alerts['dec'].values, unit='degree')
+    
+    xs = []
+    ys = []
+    for i in range(len(coords)):
+        sep1 = c2.separation(coords[i]).arcsec
+        pos1 = c2.position_angle(coords[i]).rad
+        x1 = sep1 * np.cos(pos1)
+        y1 = sep1 * np.sin(pos1)
+        xs.append(x1)
+        ys.append(y1)
+    xs = np.array(xs)
+    ys = np.array(ys)
+    
+    sep2 = c2.separation(c1).arcsec
+    pos2 = c2.position_angle(c1).rad
+    x2 = sep2 * np.cos(pos2)
+    y2 = sep2 * np.sin(pos2)
+    
+    plt.figure(figsize = (6, 6))
+    for i in range(len(xs)):
+        plt.plot([0, xs[i]], [0, ys[i]], 'k-', alpha=0.1, linewidth = 2.5, zorder=1)
+        plt.plot(xs[i], ys[i], 'k.', zorder=1)
+    plt.plot(0, 0, 'k.', label = '%d alert detections'%len(tb_alerts))
+    plt.plot(0, 0, 'r.', label='re-centered position', zorder=2)
+    plt.xlabel(r'$\Delta$'+'RA (arcsec)')
+    plt.ylabel(r'$\Delta$'+'DEC (arcsec)')
+    plt.title(name)
+    
+    plt.plot([0,x2], [0, y2], 'm-', zorder=2)
+    plt.plot(x2, y2, 'm.', label='marshal position', zorder=2)
+    
+    phis = np.linspace(0, 2*np.pi, 1000)
+    xxs = radius * np.cos(phis)
+    yys = radius * np.sin(phis)
+    plt.plot(xxs, yys, 'g--', label='radius = '+repr(radius)+' arcsec', zorder=2)
+    ax = plt.gca()
+    xlims = ax.get_xlim()
+    ylims = ax.get_ylim()
+    xylim = max(abs(xlims[0]), abs(xlims[1]), abs(ylims[0]), abs(ylims[1]))
+    plt.xlim(-1*xylim, xylim)
+    plt.ylim(-1*xylim, xylim)
+    plt.legend(loc = 'best', fontsize = fontsize)
+    plt.tight_layout()
+    plt.savefig(targetdir+'astrometry.png')
+    plt.close()
+
+
+def recenter_pos_kowalski(targetdir, name):
+    k = Kowalski(username=DEFAULT_AUTH_kowalski[0], password=DEFAULT_AUTH_kowalski[1], verbose=False)
+    qu = {"query_type": "general_search", 
+          "query": "db['ZTF_alerts'].find({'objectId': {'$eq': '%s'}})"%name}
+        
+    r = k.query(query=qu)
+    
+    if 'result_data' in r.keys():
+        rdata = r['result_data']
+        rrdata = rdata['query_result']
+        n = len(rrdata)
+        ras = np.zeros(n)
+        decs = np.zeros(n)
+        for i in range(n):
+            rrrcoo = rrdata[i]['coordinates']['radec_deg']
+            ras[i] = rrrcoo[0]
+            decs[i] = rrrcoo[1]
+            
+        tb = Table([ras, decs], names = ['ra', 'dec'])
+        tb.write(targetdir+'alert_coo.csv', overwrite=True)
+        
+        ra = np.median(ras)
+        dec = np.median(decs)
+        
+        
+        return ra, dec
+    else:
+        print ('Kowalski query is not succesful for %s'%name)
+
+
+def get_coo_ZTFtarget(name, targetdir):
     '''
     Preparation for force psf photometry light curve for ZTF a source:
-        1) download images
-        2) re-center the coordinate 
-           (usually only small offset from the marshal, ~0.1 arcsec)
     
     Parameters:
     -----------
     name: [str]
         Name of a target on the marshal.
         
-    targetdir: [str] -optional-
+    targetdir: [str] 
         Directory where the data should be stored. 
-        - `dirout='default'`: All the data will be saved in target location 
-                              (`currentdir/name/`)
-                              
-    before_marshal_detection: [None | float, >0] -optional-
-        The number of days before the first marshal detection to download 
-        archival images. A target may have lots of images well before the first
-        detection. 
-        - `before_marshal_detection=None`: download all archival images
-        
-    detection_jd: [float] -optional-
-        The julian date when this target is first detected on Marshal
-        Only useful when before_marshal_detection is not None
-         - `detection_jd=None`: then this function will find this jd automatically
-        
+                                  
     recenter_coo: [bool] -optional-
         Re-determine the coordinate of the target by taking the median of all
-        target positions within 
-        [jd_peak - ndays_before_peak, jd_peak + ndays_after_peak]
-        - `recenter_coo=False`: use the coordinate on Marshal webpage
-    
-    ndays_before_peak, ndays_after_peak: [int] -optional-
-        see recenter_coo; Only useful when recenter_coo is True
-        
-    open_check: [bool] -optional-
-        If true, each file will be check to see if it can be opened after download.
-        Broken files seldom exist.
-        
+        target positions in alert packet
+         
     Returns:
     -------
     None
     
     Outputs:
     --------
-    `targetdir/lightcurves/marshal_lightcurve_ZTFname.csv`: [file]
-        marshal lightcurve
-        
-    `targetdir/images_refdiff/`: [directory]
-        contains difference images on which PSF photometry is performed
-        
-    `targetdir/images_diffpsf/`: [directory]
-        contains images with psf models on each epoch
-        
-    `targetdir/irsafile.csv` & `targetdir/missingdata.txt`: [file]
-        by-products in the process of downloading from irsa
-        
     `targetdir/coo_marshal.reg`: [file]
         marshal coordinate of the source
     
-    `targetdir/coo.reg`: [file]
+    `targetdir/coo_kowalksi.reg`: [file]
         re-centered coordinate; only exist when recenter_coo == True
-        
-    `targetdir/astrometry.pdf`: [file]
-        a figure showing how far the recentered coordinate is from the marshal
-        coordinate; only exist when recenter_coo == True
     '''
          
     name = str(name)
-    bad_threshold = -500 # Pixels with value < bad_threshold will be counted as bad pixels
     
     ##### make a directory to store all the data relavant to this target ######
     if targetdir == 'default':
@@ -358,117 +436,45 @@ def prepare_forced_phot(name, targetdir = 'default',
     try:
         ra1, dec1 = np.loadtxt(targetdir+'/coo_marshal.reg')
     except:
-        print ('\n')
-        print ("Start getting coordinate for %s" %name)
+        print ("Start getting marshal coordinate for %s" %name)
         ra1, dec1 = get_pos(name)
         print ('%s: ra=%f, dec=%f'%(name, ra1, dec1))
+        c1 = SkyCoord(ra = ra1, dec = dec1, unit = 'degree')
+        print (c1.ra.to_string(u.hour) + ' ' + c1.dec.to_string(u.degree))
         np.savetxt(targetdir+'/coo_marshal.reg', [ra1, dec1])
         
-    ######################## download images from irsa ########################
-    if before_marshal_detection == None:
-        start_jd = None
-    else:
-        if detection_jd == None:
-            marshal_lc = pd.read_csv(targetdir+'lightcurves/'+ \
-                                     'marshal_lightcurve_'+name+'.csv')    
-            detection_ix = np.where(marshal_lc['magpsf'].values!=99)[0][0]
-            detection_jd = marshal_lc['jdobs'][detection_ix]
-            
-        start_jd = detection_jd - before_marshal_detection
-    download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd, open_check)
-        
     ################# re-center the coordinate of the source ##################
-    if recenter_coo == True:
-        print ('Determining the coordinate based on observations around peak...')
-        marshal_lc = pd.read_csv(targetdir+'lightcurves/'+ \
-                                 'marshal_lc_'+name+'.csv')  
-        mags = marshal_lc['mag'].values
-        peak_ix = np.where(mags == mags.min())[0][0]
-        peak_jd = marshal_lc['jdobs'][peak_ix]
-        fade_ix = np.where(marshal_lc['mag'].values!=99)[0][-1]
-        fade_jd = marshal_lc['jdobs'][fade_ix]
-        if detection_jd == None:
-            detection_ix = np.where(marshal_lc['mag'].values!=99)[0][0]
-            detection_jd = marshal_lc['jdobs'][detection_ix]
-        
-        if (peak_jd - detection_jd) < ndays_before_peak:
-            ndays_before_peak = peak_jd - detection_jd
-            print ('setting ndays_before_peak to %.2f'%ndays_before_peak)
-        if (fade_jd - peak_jd) < ndays_after_peak:
-            ndays_after_peak = fade_jd - peak_jd
-            print ('setting ndays_after_peak to %.2f' %ndays_after_peak)
-        
-        get_refined_coord(name, ra1, dec1, bad_threshold, targetdir, peak_jd,
-                          ndays_before_peak, ndays_after_peak)
+    try:
+        ra2, dec2 = np.loadtxt(targetdir+'/coo_kowalski.reg')
+    except:
+        print ('\n')
+        print ("Recentering coordinate for %s from Kowalki" %name)
+        ra2, dec2 = recenter_pos_kowalski(targetdir, name)
+        print ('%s: ra=%f, dec=%f'%(name, ra2, dec2))
+        c2 = SkyCoord(ra = ra2, dec = dec2, unit = 'degree')
+        print (c2.ra.to_string(u.hour) + ' ' + c2.dec.to_string(u.degree))
+        np.savetxt(targetdir+'/coo_kowalski.reg', [ra2, dec2])
         
         
-def get_force_lightcurve(name, targetdir, 
-                         r_psf = 3, r_bkg_in = 25, r_bkg_out = 30,
-                         plot_mod = 10000, manual_mask = False, 
-                         col_mask_start = 0, col_mask_end = 0,                  
-                         row_mask_start = 0, row_mask_end = 0, verbose = False,
-                         save_xy = False):
+def get_cutout_data(name, targetdir, ra, dec,
+                    r_psf = 3, r_bkg_in = 25, r_bkg_out = 30, verbose = False):
     '''
     Parameters:
     -----------
-    manual_mask: [bool] -optional-
-        manually mask some pixels within the 25*25 cutout at every epoch. 
-        If true, masked region will be a square of
-        [col_mask_start:col_mask_end, row_mask_start:row_mask_end]
-        currently only support square mask.
-        Set manual_mask = True when there is bad subtraction at the same region
-        on every image (e.g., nucleus of the host galaxy)
-        
-    plot_mod: [int] -optional-
-        Visualization of the psf fitting every plot_mod images
-        All figures will be saved to `targetdir/figures/`
-        - `plot_mod=10000`: do not visualize the fitting
-        - `plot_mod=1`: visualize every image 
-    
-    col_mask_start, col_mask_end, row_mask_start, row_mask_end: [int, >=0, <25] -optional-
-        see manual_mask; Only useful when manual_mask = True
-        
     r_bkg_in, r_bkg_out: [float] -optional-
         Inner and outer radius of an annulus to estimate background noise, in 
         pixel unit. Note that P48 pixel scale is 1.012 arcsec per pixel
         The default values are recommended.
         
-    save_xy: [bool] -optional-
-        whether to save the cutout values when doing this fitting.
-        If save_xy = True, this function will output a separate file to 
-        targetdir/lightcurves/xydata_name.fits
-        
     Outputs:
     --------
-    `targetdir/lightcurves/force_phot_ZTFname_output1.fits: [file]
-        force photometry lightcurve [before calibration]
+    `targetdir/lightcurves/force_phot_ZTFname_info.fits: [file]
+        observation keywords [before calibration]
     
-    `targetdir/figures/`: [directory]
-        cantains visualization of the PSF fitting process; only exist when 
-        plot_mod is not None
     '''     
-        
-    bad_threshold = -500 # Pixels with value < bad_threshold will be counted as bad pixels
-    
     ################  read the coordinate and make figure dir #################
-    try:
-        ra, dec = np.loadtxt(targetdir+'coo.reg')
-    except:
-        try: 
-            ra, dec = np.loadtxt(targetdir+'coo_marshal.reg')
-        except:
-            print ('Error: no coordinate found!')
-            
     imgdir = targetdir+'images_refdiff/'
     psfdir = targetdir+'images_diffpsf/'
-    
-    try:
-        os.stat(targetdir+'figures/')
-        figurefiles = glob.glob(targetdir+'figures/*')
-        for item in figurefiles:
-            os.remove(item)
-    except:
-        os.mkdir(targetdir+'figures/')
     
     #################### load psf and refdiff image files #####################
     imgfiles = np.array(glob.glob(imgdir+'*.fits'))
@@ -479,41 +485,45 @@ def get_force_lightcurve(name, targetdir,
     psffiles = psffiles[arg]
     n = len(imgfiles)
     
-    jdobs_ = np.zeros(n)
-    filter_ = np.array(['']*n)
-    zp_ = np.ones(n)*(99)
-    ezp_ = np.ones(n)*(99)
-    seeing_ = np.ones(n)*(99)
+    jdobs_ = np.zeros(n) #
+    filter_ = np.array(['']*n) #
+    zp_ = np.ones(n)*(99) #
+    ezp_ = np.ones(n)*(99) #
+    seeing_ = np.ones(n)*(99) #
+    gains_ = np.zeros(n) #
+    
     programid_ = np.zeros(n)
     field_ = np.zeros(n)
     ccdid_ = np.zeros(n)
     qid_ = np.zeros(n)
     filtercode_ = np.zeros(n)
     
-    Fpsf_ = np.ones(n)*(99)
-    eFpsf_ = np.ones(n)*(99)
-    Fap_ = np.ones(n)*(99)
-    rvalue_ = np.zeros(n)
-    nbads_ = np.zeros(n)
-    nbadbkgs_ = np.zeros(n)
-    chi2red_ = np.zeros(n)
-    gains_ = np.zeros(n)
+    moonra_ = np.zeros(n) #
+    moondec_ = np.zeros(n) #
+    moonillf_  = np.zeros(n) #
+    moonphas_ = np.zeros(n) #
+    airmass_ = np.zeros(n) #
     
-    if save_xy == True:
-        path_cutouts = []
-        psf_cutouts = []
-        img_cutouts = []
-        eimg_cutouts = []
+    nbads_ = np.zeros(n) #
+    nbadbkgs_ = np.zeros(n) #
+    bkgstd_ = np.zeros(n) #
+    bkgmed_ = np.zeros(n) #
+    
+    path_cutouts = []
+    psf_cutouts = []
+    img_cutouts = []
+    eimg_cutouts = []
+        
+    status_ = np.ones(n) #
     
     ####################### dalta analysis: light curve #######################
-    print ('\n')
-    print ('Start fitting forced light curve for %s...'%name)
+    print ('Start saving cutouts and observation info for %s...'%name)
     for i in range(n):
-        if i%20==0:
-            print ('In progress: %d in %d...' %(i, n))
+        if i%50==0:
+            print ('In progress %s: %d in %d...' %(name, i, n))
         imgpath = imgfiles[i]
         psfpath = psffiles[i]
-        pobj = ZTFphot(name, ra, dec, imgpath, psfpath, bad_threshold, r_psf, 
+        pobj = ZTFphot(name, ra, dec, imgpath, psfpath, r_psf, 
                        r_bkg_in, r_bkg_out, verbose)
         zp_[i] = pobj.zp
         ezp_[i] = pobj.e_zp
@@ -526,77 +536,72 @@ def get_force_lightcurve(name, targetdir,
         ccdid_[i] = pobj.ccdid
         qid_[i] = pobj.qid
         filtercode_[i] = pobj.filterid
+        moonra_[i] = pobj.moonra
+        moondec_[i] = pobj.moondec
+        moonillf_[i] = pobj.moonillf
+        moonphas_[i] = pobj. moonphas
+        airmass_[i] = pobj.airmass
+        
         if pobj.status == False:
+            status_[i] = 0
             continue
         
         pobj.load_source_cutout() 
         if pobj.status == False:
+            status_[i] = 0
             continue
             
-        pobj.load_bkg_cutout(manual_mask, col_mask_start, col_mask_end,
-                             row_mask_start, row_mask_end)
+        pobj.load_bkg_cutout()
+        pobj.get_scr_cor_fn()  
         
-        pobj.get_scr_cor_fn()        
-        pobj.fit_psf()
-        Fpsf_[i] = pobj.Fpsf
-        Fap_[i] = pobj.Fap
-        eFpsf_[i] = pobj.eFpsf
-        rvalue_[i] = pobj.r_value
         nbads_[i] = pobj.nbad
         nbadbkgs_[i] = pobj.nbad_bkg
-        chi2red_[i] = pobj.chi2_red
+        bkgstd_[i] = pobj.bkgstd
+        bkgmed_[i] = pobj.bkgmed
         
-        if save_xy==True:
-            path_cutouts.append(imgpath.split('/')[-1])
-            psf_cutouts.append(pobj.psf_fn[~pobj.bad_mask])
-            img_cutouts.append(pobj.scr_cor_fn[~pobj.bad_mask])
-            eimg_cutouts.append(pobj.yerrs)
-        
-        # if i%plot_mod==0 or pobj.nbad!=0:
-        if i%plot_mod==0:
-            savepath = targetdir+'/figures/'+repr(i)+'_'+\
-                    imgpath.split('/')[-1].split('_sci')[0]
-            pobj.plot_cutouts(savepath = savepath)
+        path_cutouts.append(imgpath.split('/')[-1])
+        psf_cutouts.append(pobj.psf_fn[~pobj.bad_mask])
+        img_cutouts.append(pobj.scr_cor_fn[~pobj.bad_mask])
+        eimg_cutouts.append(pobj.yerrs)
     print ('\n')
     
     ####################### save the results to a file ########################
     diffimgname = np.array([x.split('/')[-1]for x in imgfiles])
     psfimgname = np.array([x.split('/')[-1]for x in psffiles])
-    print ('writing light curve to database')
-    data = [jdobs_, filter_, seeing_, gains_, zp_, ezp_, Fpsf_, eFpsf_, Fap_, 
-            rvalue_, nbads_, nbadbkgs_, chi2red_, programid_, field_,
-            ccdid_, qid_, filtercode_, diffimgname, psfimgname]
+    
+    data = [jdobs_, filter_, seeing_, gains_, zp_, ezp_, 
+            programid_, field_, ccdid_, qid_, filtercode_, 
+            moonra_, moondec_, moonillf_, moonphas_, airmass_,
+            nbads_, nbadbkgs_, bkgstd_,  bkgmed_, diffimgname, psfimgname]
     
     my_lc = Table(data,names=['jdobs','filter', 'seeing', 'gain', 'zp', 'ezp',
-                              'Fpsf', 'eFpsf', 'Fap', 'rvalue', 'nbad',
-                              'nbadbkg', 'chi2red', 'programid', 'fieldid',
-                              'ccdid', 'qid', 'filterid', 'diffimgname', 'psfimgname'])
+                              'programid', 'fieldid', 'ccdid', 'qid', 'filterid', 
+                              'moonra', 'moondec', 'moonillf', 'moonphase', 'airmass',
+                              'nbad', 'nbadbkg', 'bkgstd', 'bkgmed', 'diffimgname', 
+                              'psfimgname'])
     
-    my_lc.write(targetdir+'/lightcurves/force_phot_'+name+'_output1.fits', overwrite=True)
+    mylc = my_lc[status_==1]
+    print ('writing data to database')
+    mylc.write(targetdir+'/lightcurves/force_phot_'+name+'_info.fits', overwrite=True)
     
-    if save_xy==True:
-        path_cutouts = np.array(path_cutouts)
-        psf_cutouts = np.array(psf_cutouts)
-        img_cutouts = np.array(img_cutouts)
-        xs = []
-        ys = []
-        eys = []
-        ps = []
-        index = []
-        for i in range(len(path_cutouts)):
-            for x in psf_cutouts[i]:
-                xs.append(x)
-                ps.append(path_cutouts[i])
-            for y in img_cutouts[i]:
-                ys.append(y)
-                index.append(i)  
-            for ey in eimg_cutouts[i]:
-                eys.append(ey)
+    assert len(path_cutouts) == len(mylc)
+    path_cutouts = np.array(path_cutouts)
+    psf_cutouts = np.array(psf_cutouts)
+    img_cutouts = np.array(img_cutouts)
+    xs = []
+    ys = []
+    eys = []
+    ps = []
+    index = []
+    for i in range(len(path_cutouts)):
+        for x in psf_cutouts[i]:
+            xs.append(x)
+            ps.append(path_cutouts[i])
+        for y in img_cutouts[i]:
+            ys.append(y)
+            index.append(i)  
+        for ey in eimg_cutouts[i]:
+            eys.append(ey)
         
-        my_dt = Table([index, xs, ys, eys, ps], names = ['index', 'x', 'y', 'ey', 'path'])
-        my_dt.write(targetdir+'/lightcurves/xydata_'+name+'.fits', overwrite=True)
-        
-        
-        
-        
-        
+    my_dt = Table([index, xs, ys, eys, ps], names = ['index', 'x', 'y', 'ey', 'path'])
+    my_dt.write(targetdir+'/lightcurves/xydata_'+name+'.fits', overwrite=True)  

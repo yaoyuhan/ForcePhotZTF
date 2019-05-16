@@ -11,7 +11,7 @@ import numpy as np
 
 
 def add_ZTFfilters():
-    directory=os.getcwd()+'/data/'
+    directory='/Users/yuhanyao/Documents/ForcePhotZTF/data/'
     bandsP48 = {'p48i': 'P48_I.dat',
                 'p48r': 'P48_R.dat',
                 'p48g': 'P48_g.dat'}
