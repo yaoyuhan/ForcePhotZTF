@@ -7,7 +7,6 @@ Created on Fri Dec 28 15:26:28 2018
 """
 import requests
 import numpy as np
-import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 
@@ -124,7 +123,7 @@ def quicklook_lc(name, targetdir, eFratio_upper_cut = np.nan, seeing_cut = np.na
     plt.savefig(targetdir+name+'_quicklook.pdf')
 
 
-def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = False,
+def get_recerence_jds(name, targetdir, only_partnership=False, retain_iband = True,
                       oldsuffix = '_info.fits', newsuffix = '_info_ref.fits', verbose=True):
     print ('Start getting jd of reference exposures for %s'%name)
     s = requests.Session()
@@ -181,8 +180,8 @@ def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = Fal
         stringnow = r.content
         stnow = stringnow.decode("utf-8")
         tbnowj = asci.read(stnow)
-        t0 = tbnowj['startobsdate'].data.data[0]
-        t1 = tbnowj['endobsdate'].data.data[0]
+        t0 = tbnowj['startobsdate'].data[0]
+        t1 = tbnowj['endobsdate'].data[0]
         tstart = Time(t0.split(' ')[0] + 'T' + t0.split(' ')[1][:-3], 
                       format='isot', scale='utc')
         tend = Time(t1.split(' ')[0] + 'T' + t1.split(' ')[1][:-3], 
@@ -198,5 +197,6 @@ def get_recerence_jds(name, targetdir, only_partnership=True, retain_iband = Fal
     mylc['jdref_start'] = jdref_start
     mylc['jdref_end'] = jdref_end
         
-    mylc.write(targetdir+'lightcurves/force_phot_' + name + newsuffix, 
-               overwrite=True)  
+    mylc.write(targetdir+'lightcurves/force_phot_' + name + newsuffix, overwrite=True)  
+    
+    
