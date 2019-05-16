@@ -9,6 +9,7 @@ import requests
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.rcParams['font.size']=14
 
 import astropy.io.ascii as asci
 from astropy.io import fits
@@ -21,107 +22,62 @@ DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_ipac = DEFAULT_AUTHs[2]
 
 
-def quicklook_lc(name, targetdir, eFratio_upper_cut = np.nan, seeing_cut = np.nan,
-                 badbkg_remove = 0, baseline_end = np.nan,
-                 suffix = '_output2.fits'):
+
+def plotlcs(tb, name, targetdir, t0jd=2458600, 
+            jdend = 2458900, base_end = 2458480, ylims1 =None, 
+            seeing_cut = 7.):
     
-    mylc = Table(fits.open(targetdir+'lightcurves/force_phot_'+name+suffix)[1].data) 
+    tb['fcqfid'] = tb['fieldid']*10000 + tb['ccdid']*100 + tb['qid']*10 + tb['filterid']
     
-    F0 = 10**(mylc['zp']/2.5)
-    eF0 = F0 / 2.5 * np.log(10) * mylc['ezp']
-    Fpsf = mylc['Fpsf']
-    eFpsf = mylc['eFpsf']
+    F0 = 10**(tb['zp'].values/2.5)
+    eF0 = F0 / 2.5 * np.log(10) * tb['ezp'].values
+    Fpsf = tb['Fmcmc'].values
+    eFpsf = tb['Fmcmc_unc'].values
     Fratio = Fpsf / F0
     eFratio2 = (eFpsf / F0)**2 + (Fpsf * eF0 / F0**2)**2
     eFratio = np.sqrt(eFratio2)
+    tb['Fratio'] = Fratio
+    tb['Fratio_unc'] = eFratio
     
-    mylc['Fratio'] = Fratio
-    mylc['eFratio'] = eFratio
+    ix = tb['jdobs']<jdend
+    tb = tb[ix]
+    tb = tb[tb.seeing<seeing_cut]
     
-    if np.isnan(seeing_cut) == False:
-        ix = mylc['seeing']<seeing_cut
-        mylc = mylc[ix]
-
-    if np.isnan(eFratio_upper_cut) == False:
-        ix = mylc['eFratio'] < eFratio_upper_cut
-        mylc = mylc[ix]
+    fcqfs = np.unique(tb['fcqfid'].values)
+    
+    colors_g = ['limegreen', 'c', 'skyblue']
+    colors_r = ['r', 'm', 'pink']
+    colors_i = ['gold', 'orange', 'y']
         
-    fcqf_uniq = []
-    for x in mylc['fcqf']:
-        if x not in fcqf_uniq:
-            fcqf_uniq.append(x)
-    fcqf_uniq = np.array(fcqf_uniq)
-    
-    plt.figure(figsize=(10,10))
-    matplotlib.rcParams.update({'font.size': 15})
-    ax1 = plt.subplot(311)
-    ax2 = plt.subplot(312)
-    ax3 = plt.subplot(313)
-    colors_g = ['g', 'b', 'c']
-    colors_r = ['r', 'm', 'orange']
-    for j in range(len(fcqf_uniq)):
-        sublc = mylc[mylc['fcqf']==fcqf_uniq[j]]
-        
-        if fcqf_uniq[j]%2==0: # r abnd
-            color = colors_r[0]
-            colors_r = colors_r[1:]
-
-        else:
-            color = colors_g[0]
+    plt.figure(figsize=(12,6))
+    for fcqfid in fcqfs:
+        ix = tb['fcqfid'].values==fcqfid
+        if fcqfid % 10 ==1:
+            color=colors_g[0]
             colors_g = colors_g[1:]
+        elif fcqfid % 10 == 2:
+            color=colors_r[0]
+            colors_r = colors_r[1:]
+        else:
+            color=colors_i[0]
+            colors_i = colors_i[1:]
+        thistime = (tb['jdobs'][ix] - t0jd)
+        plt.errorbar(thistime, tb['Fratio'][ix], tb['Fratio_unc'][ix], 
+                     fmt='.', color=color, label = 'fcqfid = %d, Nobs = %d'%(fcqfid, np.sum(ix)))
         
-        ax1.errorbar(sublc['jdobs'], sublc['Fratio'], sublc['eFratio'], fmt='.', color=color)
-        ax2.errorbar(sublc['jdobs'], sublc['Fpsf'].data, sublc['eFpsf'], fmt='.', color=color)
+    ax = plt.gca()
+    ylims1 = ax.get_ylim()
         
-        ix = sublc['nbad']!=0
-        if np.sum(ix)>0:
-            ax1.errorbar(sublc['jdobs'][ix], sublc['Fratio'][ix], sublc['eFratio'][ix], fmt='.k')
-            ax2.errorbar(sublc['jdobs'][ix], sublc['Fpsf'][ix].data, sublc['eFpsf'][ix], fmt='.k')
-            
-        if badbkg_remove==1:
-            ix = sublc['nbadbkg']!=0    
-            if np.sum(ix)>0:
-                ax1.errorbar(sublc['jdobs'][ix], sublc['Fratio'][ix], sublc['eFratio'][ix], fmt='.', color='grey')
-                ax2.errorbar(sublc['jdobs'][ix], sublc['Fpsf'][ix].data, sublc['eFpsf'][ix], fmt='.', color='grey')
-        
-        ix = sublc['Fratio']>3*sublc['eFratio']
-        subsublc = sublc[ix]
-        
-        mag = -2.5 * np.log10(subsublc['Fratio'])
-        emag = 2.5 / np.log(10) * subsublc['eFratio'] / subsublc['Fratio']
-        ax3.errorbar(subsublc['jdobs'], mag, emag, fmt='.', color=color)
-     
-    ylims1 = ax1.get_ylim()
-    ylims1 = [ylims1[0], ylims1[1]]
-    ylims2 = ax2.get_ylim()
-    ylims2 = [ylims2[0], ylims2[1]]
-    ylims3 = ax3.get_ylim()
-    ax3.set_ylim(ylims3[1], ylims3[0])
-    
-    if np.isnan(baseline_end)==False:
-        ax1.plot([baseline_end,baseline_end], ylims1, 'k--')
-        ax2.plot([baseline_end,baseline_end], ylims2, 'k--')
-        ax3.plot([baseline_end,baseline_end], ylims3, 'k--')
-    
-    xlims = ax1.set_xlim()
-    ax3.set_xlim(xlims[0], xlims[1])
-        
-    ax1.grid(linestyle=':')
-    ax2.grid(linestyle=':')
-    ax3.grid(linestyle=':')
-    ax1.set_title(name)
-    ax1.set_xticklabels([])
-    ax2.set_xticklabels([])
-    ax3.set_xlabel('jd')
-    ax1.set_ylabel('f/f_0')
-    ax2.set_ylabel('DN')
-    ax3.set_ylabel('mag')
-    ax1.tick_params(axis='both', which='both', direction='in')
-    ax2.tick_params(axis='both', which='both', direction='in')
-    ax3.tick_params(axis='both', which='both', direction='in')
+    plt.ylim(ylims1[0], ylims1[1])
+    plt.grid(ls=":")
+    plt.xlabel('rest frame days relative to B max')
+    plt.ylabel('f/f0')
+    plt.legend(loc = 'best')
+    plt.title(name)
     plt.tight_layout()
-    plt.savefig(targetdir+name+'_quicklook.pdf')
-
+    plt.savefig(targetdir + name+'_fig_lc'+'.pdf')
+    
+    
 
 def get_recerence_jds(name, targetdir, only_partnership=False, retain_iband = True,
                       oldsuffix = '_info.fits', newsuffix = '_info_ref.fits', verbose=True):
