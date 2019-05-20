@@ -7,6 +7,7 @@ Created on Fri Dec 28 15:26:28 2018
 """
 import requests
 import numpy as np
+import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.rcParams['font.size']=14
@@ -22,13 +23,73 @@ DEFAULT_AUTHs = get_keypairs()
 DEFAULT_AUTH_ipac = DEFAULT_AUTHs[2]
 
 
+def read_ipac_lc(name, targetdir):
+    myfile = targetdir + "lightcurves/forcedphotometry_ipac_lc.txt"
+    f = open(myfile)
+    lines = f.readlines()
+    f.close()
+    tb = asci.read(lines[69:])
+    colnames = (lines[67][1:].split('\n'))[0].split(', ')
+    for j in range(len(colnames)):
+        tb.rename_column('col%d'%(j+1), colnames[j])   
+    if tb['forcediffimfluxunc'].dtype in ['<U16', '<U17', '<U18', '<U19']:
+        ix = tb['forcediffimfluxunc']=='null'
+        tb = tb[~ix]
+        tb['forcediffimfluxunc'] = np.array(tb['forcediffimfluxunc'], dtype=float)
+    tb['forcediffimflux'] = np.array(tb['forcediffimflux'], dtype=float)
+    tb = tb.to_pandas()
+    
+    tb.rename(columns={'forcediffimflux':'Fpsf',
+                       'forcediffimfluxunc':'Fpsf_unc',
+                       'zpdiff':'zp',
+                       'zpmaginpsciunc':'ezp',
+                       'jd':'jdobs',
+                       'forcediffimchisq':'chi2_red',
+                       'sciinpseeing':'seeing'}, inplace=True)
+    
+    #ix = tb['programid']==2
+    #tb = tb[ix]
+    
+    F0 = 10**(tb['zp'].values/2.5)
+    eF0 = F0 / 2.5 * np.log(10) * tb['ezp'].values
+    Fpsf = tb['Fpsf'].values
+    eFpsf = tb['Fpsf_unc'].values
+    Fratio = Fpsf / F0
+    eFratio2 = (eFpsf / F0)**2 + (Fpsf * eF0 / F0**2)**2
+    eFratio = np.sqrt(eFratio2)
+    tb['Fratio'] = Fratio
+    tb['Fratio_unc'] = eFratio
+    
+    filt = tb['filter']
+    filterid = np.zeros(len(tb))
+    filterid[filt=='ZTF_g']=1
+    filterid[filt=='ZTF_r']=2
+    filterid[filt=='ZTF_i']=3
+    tb['filterid'] = filterid
+    
+    tb['chi2_red'] = np.array([np.float(x) for x in tb['chi2_red'].values])
+    
+    tb['fcqfid'] = tb['field']*10000 + tb['ccdid']*100 + tb['qid']*10 + tb['filterid']
+    
+    tb['diffimgname'] = [x[34:-3] for x in tb['diffilename'].values]
+    return tb
 
-def plotlcs(tb, name, targetdir, t0jd=2458600, 
-            jdend = 2458900, base_end = 2458480, ylims1 =None, 
-            seeing_cut = 7.):
+
+def read_mcmc_lc(name, targetdir):
+    info_file = targetdir+'lightcurves/force_phot_{}_info_ref.fits'.format(name)
+    # xy_file = targetdir+'lightcurves/xydata_{}.fits'.format(name)
     
-    tb['fcqfid'] = tb['fieldid']*10000 + tb['ccdid']*100 + tb['qid']*10 + tb['filterid']
-    
+    info_tbl = Table.read(info_file)
+    # xy_tbl = Table.read(xy_file)
+    info_df = info_tbl.to_pandas()
+    # xy_df = xy_tbl.to_pandas()
+
+    mylc = pd.read_hdf(targetdir+'lightcurves/'+name+'_force_phot_nob.h5')
+    mylc['jdref_start'] = info_df['jdref_start'].values
+    mylc['jdref_end'] = info_df['jdref_end'].values
+
+    mylc['fcqfid'] = mylc['fieldid']*10000 + mylc['ccdid']*100 + mylc['qid']*10 + mylc['filterid']
+    tb = mylc
     F0 = 10**(tb['zp'].values/2.5)
     eF0 = F0 / 2.5 * np.log(10) * tb['ezp'].values
     Fpsf = tb['Fmcmc'].values
@@ -39,8 +100,12 @@ def plotlcs(tb, name, targetdir, t0jd=2458600,
     tb['Fratio'] = Fratio
     tb['Fratio_unc'] = eFratio
     
-    ix = tb['jdobs']<jdend
-    tb = tb[ix]
+    tb['diffimgname'] = [x.decode("utf-8") for x in tb['diffimgname'].values]
+    return tb
+    
+    
+
+def plotlcs(tb, name, targetdir, seeing_cut = 7.):
     tb = tb[tb.seeing<seeing_cut]
     
     fcqfs = np.unique(tb['fcqfid'].values)
@@ -61,7 +126,7 @@ def plotlcs(tb, name, targetdir, t0jd=2458600,
         else:
             color=colors_i[0]
             colors_i = colors_i[1:]
-        thistime = (tb['jdobs'][ix] - t0jd)
+        thistime = (tb['jdobs'][ix] - 2458000)
         plt.errorbar(thistime, tb['Fratio'][ix], tb['Fratio_unc'][ix], 
                      fmt='.', color=color, label = 'fcqfid = %d, Nobs = %d'%(fcqfid, np.sum(ix)))
         
@@ -70,7 +135,7 @@ def plotlcs(tb, name, targetdir, t0jd=2458600,
         
     plt.ylim(ylims1[0], ylims1[1])
     plt.grid(ls=":")
-    plt.xlabel('rest frame days relative to B max')
+    plt.xlabel('JD - 2458000 (days)')
     plt.ylabel('f/f0')
     plt.legend(loc = 'best')
     plt.title(name)
