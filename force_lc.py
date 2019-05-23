@@ -215,10 +215,10 @@ def download_marshal_lightcurve(name, targetdir):
         tables = pd.read_html(r.content)
         mtb = tables[14]
         mtb = mtb.drop([0], axis=1)
-        mtb.to_csv(targetdir+'lightcurves/'+'/marshal_lc_'+name+'.csv',header=False, index = False)
+        mtb.to_csv(targetdir+'lightcurves'+'/marshal_lc_'+name+'.csv',header=False, index = False)
     
     ###################### visualize marshal lightcurve #######################
-    mtb = asci.read(targetdir+'lightcurves/'+'/marshal_lc_'+name+'.csv')
+    mtb = asci.read(targetdir+'lightcurves'+'/marshal_lc_'+name+'.csv')
     ix = mtb['absmag']!=99
     mtb = mtb[ix]
     

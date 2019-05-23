@@ -221,3 +221,79 @@ def get_recerence_jds(name, targetdir, only_partnership=False, retain_iband = Tr
     mylc.write(targetdir+'lightcurves/force_phot_' + name + newsuffix, overwrite=True)  
     
     
+    
+def get_recerence_jds_simple(filein, fileout, only_partnership=False, retain_iband = True, verbose=True):
+    s = requests.Session()
+    
+    s.post('https://irsa.ipac.caltech.edu/account/signon/login.do?josso_cmd=login', 
+           data={'josso_username': DEFAULT_AUTH_ipac[0], 'josso_password': DEFAULT_AUTH_ipac[1]})
+    
+    mylc = Table(fits.open(filein)[1].data)
+    
+    if retain_iband==False:
+        ix= np.any([mylc['filter']=='r', mylc['filter']=='g'], axis=0)
+        mylc = mylc[ix]
+    
+    if only_partnership==True:
+        ix = mylc['programid']==2
+        mylc = mylc[ix]
+        
+    if np.sum(mylc['qid']==99)!=0:
+        if verbose==True:
+            print ('reassign qid based on file name for this')
+        mylc['qid'] = [np.int(x.split('_o_q')[1].split('_')[0]) for x in mylc['diffimgname']]
+        
+    mylc['fcqf'] = mylc['fieldid']*10000 + mylc['ccdid']*100 + mylc['qid']*10 + mylc['filterid']
+    fcq_uniq = []
+    for x in mylc['fcqf']:
+        if x not in fcq_uniq:
+            fcq_uniq.append(x)
+    fcq_uniq = np.array(fcq_uniq)
+        
+    jdref_start = np.zeros(len(mylc))
+    jdref_end = np.zeros(len(mylc))
+        
+    for j in range(len(fcq_uniq)):
+        fcqnow = fcq_uniq[j]
+        temp1 = fcqnow - fcqnow%10000
+        fieldnow = np.int(temp1/10000)
+        temp2 = fcqnow - temp1
+        temp3 = temp2 - temp2%100
+        ccdidnow = np.int(temp3/100)
+        temp4 = temp2 - temp3
+        qidnow = np.int((temp4 - temp4%10)/10)
+        filteridnow = temp4 - qidnow*10
+        if filteridnow==1:
+            fltidnow = 'zg'
+        elif filteridnow==2:
+            fltidnow = 'zr'
+            
+        # 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=824%20AND%20ccdid=15%20AND%20qid=1%20AND%20filtercode=%271%27&CT=csv' 
+        url = 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=' +\
+                '%d'%(fieldnow)+'%20AND%20ccdid='+'%d'%(ccdidnow) +\
+                '%20AND%20qid='+'%d'%(qidnow)+\
+                '%20AND%20filtercode=%27'+'%s'%(fltidnow)+'%27' 
+        r = requests.get(url, cookies=s.cookies)
+        stringnow = r.content
+        stnow = stringnow.decode("utf-8")
+        tbnowj = asci.read(stnow)
+        t0 = tbnowj['startobsdate'].data[0]
+        t1 = tbnowj['endobsdate'].data[0]
+        tstart = Time(t0.split(' ')[0] + 'T' + t0.split(' ')[1][:-3], 
+                      format='isot', scale='utc')
+        tend = Time(t1.split(' ')[0] + 'T' + t1.split(' ')[1][:-3], 
+                    format='isot', scale='utc')
+        
+        ind = mylc['fcqf'] == fcqnow
+        jdref_start[ind] = tstart.jd
+        jdref_end[ind] = tend.jd
+        if verbose==True:
+            print ('fieldid: %d, ccdid: %d, qid: %d, filterid: %d \n \t startjd: %.2f, endjd: %.2f \n'
+                   %(fieldnow, ccdidnow, qidnow, filteridnow, tstart.jd, tend.jd))
+            
+    mylc['jdref_start'] = jdref_start
+    mylc['jdref_end'] = jdref_end
+        
+    mylc.write(fileout, overwrite=True)  
+    
+    
