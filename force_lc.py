@@ -33,8 +33,8 @@ DEFAULT_AUTH_marshal = DEFAULT_AUTHs[0]
 DEFAULT_AUTH_kowalski = DEFAULT_AUTHs[1]
 
 
-def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None, 
-                                    open_check = True):
+def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd = None, 
+                                    end_jd = None, open_check = True):
     '''
     Download subtracted images and psf images from irsa
 
@@ -44,7 +44,8 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None,
 
     ra1, dec1 are the coordinates of the target
 
-    set start_jd = None if you want all images in ZTF history
+    set start_jd and end_jd = None if you want all images in ZTF history
+        otherwise, only download images between (start_jd, end_jd)
 
     set open_check = True, the function will try to opeb all files in the final step.
     	Sometimes (although very seldom) the fits file can be broken.
@@ -80,11 +81,17 @@ def download_images_diffpsf_refdiff(targetdir, ra1, dec1, start_jd=None,
     zquery = query.ZTFQuery()
     print ('\n')
     print("Querying for metadata...")
-    if start_jd == None:
+    if start_jd == None and end_jd==None:
         zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.003)
     else:
+        if start_jd!=None and end_jd==None:
+            sql_query='obsjd>'+repr(start_jd)
+        elif start_jd==None and end_jd!=None:
+            sql_query='obsjd<'+repr(end_jd)
+        elif start_jd!=None and end_jd!=None:
+            sql_query='obsjd<'+repr(end_jd)+'+AND+'+'obsjd>'+repr(start_jd)
         zquery.load_metadata(kind = 'sci', radec = [ra1, dec1], size = 0.003,
-                             sql_query='obsjd>'+repr(start_jd))
+                             sql_query=sql_query)
     out = zquery.metatable
     final_out = out.sort_values(by=['obsjd'])
     final_out.to_csv(targetdir+'/irsafile.csv')
