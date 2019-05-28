@@ -14,7 +14,7 @@ This is written for getting the light curves of ZTF transients by forced-PSF pho
 - photutils 0.6
 - coner 2.0.1
 - image_registration 0.2.4
-- Kowalski==1.0 [link](https://github.com/dmitryduev/kowalski)
+- penquins 1.0.0 [link to Kowalski](https://github.com/dmitryduev/kowalski)
 
 ## Provide your username and password before using this package:
 ForcePhotZTF performs multiple tasks including:
