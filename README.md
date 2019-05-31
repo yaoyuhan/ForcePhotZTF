@@ -1,5 +1,8 @@
 # ForcePhotZTF
-This is written for getting the light curves of ZTF transients by forced-PSF photometry. 
+This is written for getting the light curves of ZTF transients by forced-PSF photometry. </br>
+If you wish to use light curves produced by this code please offer coauthorship to the contributors of this package.</br>
+
+Please cite our paper Yao et al. (2019, in prep).
 
 ## Python versions and package dependencies:
 - python 3.6
