@@ -12,7 +12,6 @@ import time
 import scipy.optimize as op
 from multiprocessing import Pool
 
-
 # =========================================================================== #
 # define MCMC functions
 def systematic_lnlike(theta, x, y, sigma_y):

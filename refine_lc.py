@@ -105,7 +105,7 @@ def read_mcmc_lc(name, targetdir):
     
     
 
-def plotlcs(tb, name, targetdir, seeing_cut = 7.):
+def plotlcs(tb, name, targetdir, seeing_cut = 7., show_refjds = True):
     tb = tb[tb.seeing<seeing_cut]
     
     fcqfs = np.unique(tb['fcqfid'].values)
@@ -132,6 +132,34 @@ def plotlcs(tb, name, targetdir, seeing_cut = 7.):
         
     ax = plt.gca()
     ylims1 = ax.get_ylim()
+    
+    # plot the duration of refernce image taken period...
+    if show_refjds==True:
+        
+        yupper = ylims1[0] + 0.95 * (ylims1[1]-ylims1[0])
+        ylower = ylims1[0] + 0.85 * (ylims1[1]-ylims1[0])
+        yposes = np.linspace(ylower, yupper, len(fcqfs))
+        
+        colors_g = ['limegreen', 'c', 'skyblue']
+        colors_r = ['r', 'm', 'pink']
+        colors_i = ['gold', 'orange', 'y']
+        
+        for j in range(len(fcqfs)):
+            fcqfid = fcqfs[j]
+            ix = tb['fcqfid'].values==fcqfid
+            if fcqfid % 10 ==1:
+                color=colors_g[0]
+                colors_g = colors_g[1:]
+            elif fcqfid % 10 == 2:
+                color=colors_r[0]
+                colors_r = colors_r[1:]
+            else:
+                color=colors_i[0]
+                colors_i = colors_i[1:]
+            jdstart = tb['jdref_start'].values[ix][0]-2458000
+            jdend = tb['jdref_end'].values[ix][0]-2458000
+            ypos = yposes[j]
+            plt.plot([jdstart, jdend], [ypos, ypos], '-', color = color)    
         
     plt.ylim(ylims1[0], ylims1[1])
     plt.grid(ls=":")
