@@ -1,6 +1,6 @@
 # ForcePhotZTF
 This is written for getting the light curves of ZTF transients by forced-PSF photometry. </br>
-If you wish to use light curves produced by this code please cite the original paper that describe the real-time pipeline (ZTF Science Data System): Masci et al. (2019), the the paper specifically for this package: Yao et al. (2019, in prep).
+If you wish to use light curves produced by this code please cite the original paper that describes the real-time pipeline (ZTF Science Data System): Masci et al. (2019), the the paper specifically for this package: Yao et al. (2019, in prep).
 
 ## Provide your username and password before using this package:
 ForcePhotZTF performs multiple tasks including:
