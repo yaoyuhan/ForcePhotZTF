@@ -1,23 +1,6 @@
 # ForcePhotZTF
 This is written for getting the light curves of ZTF transients by forced-PSF photometry. </br>
-If you wish to use light curves produced by this code please offer coauthorship to the contributors of this package.</br>
-
-Please cite our paper Yao et al. (2019, in prep).
-
-## Python versions and package dependencies:
-- python 3.6
-- numpy 1.16.2
-- scipy 1.2.1
-- pandas 0.24.1
-- emcee 3.0rc2 [link](https://emcee.readthedocs.io/en/latest/user/install/)
-- matplotlib 3.0.3
-- astropy 3.1.2
-- sncosmo 1.7.1
-- ztfquery 1.4.0
-- photutils 0.6
-- coner 2.0.1
-- image_registration 0.2.4
-- penquins 1.0.0 [link to Kowalski](https://github.com/dmitryduev/kowalski)
+If you wish to use light curves produced by this code please cite the original paper that describe the real-time pipeline (ZTF Science Data System): Masci et al. (2019), the the paper specifically for this package: Yao et al. (2019, in prep).
 
 ## Provide your username and password before using this package:
 ForcePhotZTF performs multiple tasks including:
