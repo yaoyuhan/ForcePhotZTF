@@ -59,7 +59,7 @@ def mylinear_fit(x, y, yerr, npar = 2):
 class ZTFphot(object):
     
     def __init__(self, name, ra, dec, imgpath, psfpath,
-                 r_psf=3, r_bkg_in=10, r_bkg_out=15, verbose=False):
+                 r_psf=3, r_bkg_in=10, r_bkg_out=15, SNT = 3, verbose=False):
         self.name = name
         self.ra = ra
         self.dec = dec
@@ -71,6 +71,7 @@ class ZTFphot(object):
         self.bad_threshold = -500
         self.length = 2*r_psf + 1
         self.verbose = verbose
+        self.SNT = SNT
         # self.stampupsamplefac = 5
         # self.newlength = self.stampupsamplefac * self.length
     
@@ -402,6 +403,23 @@ class ZTFphot(object):
         self.chi2_red = chi2_red
         if self.verbose == True:
             print ('\t Fpsf = %.2f DN, eFpsf = %.2f DN, chi2_red = %.2f'%(self.Fpsf, self.eFpsf, self.chi2_red))
+            
+        F0 = 10**(self.zp/2.5)
+        eF0 = F0 / 2.5 * np.log(10) * self.e_zp
+        
+        Fratio = Fpsf / F0
+        eFratio2 = (eFpsf / F0)**2 + (Fpsf * eF0 / F0**2)**2
+        eFratio = np.sqrt(eFratio2)
+        self.Fratio = Fratio
+        self.eFratio = eFratio
+        
+        self.limmag = -2.5 * np.log10(5 * eFratio)
+        if Fratio > (eFratio * self.SNT):
+            self.mag = -2.5 * np.log10(Fratio)
+            self.mag_unc = 2.5 / np.log(10) * eFratio / Fratio
+        else:
+            self.mag = 99
+            self.mag_unc = 99
         
         
     def plot_cutouts(self, savepath=None):

@@ -7,11 +7,12 @@ Created on Tue Jun 18 09:24:56 2019
 """
 import glob
 import numpy as np
+from astropy.io import fits
 from astropy.table import Table
 from ForcePhotZTF.phot_class import ZTFphot
 
 
-def get_forced_phot_maaxlike(name, targetdir, ra, dec,
+def get_forced_phot_maaxlike(name, targetdir, ra, dec, SNT = 4,
                              r_psf = 3, r_bkg_in = 10, r_bkg_out = 15, verbose = False):
     '''
     Parameters:
@@ -67,6 +68,12 @@ def get_forced_phot_maaxlike(name, targetdir, ra, dec,
     Fmaxlike = np.zeros(n) #
     eFmaxlike = np.zeros(n) #
     chi2_reds = np.zeros(n) #
+    Fratios = np.zeros(n) #
+    eFratios = np.zeros(n) #
+    
+    mags = np.zeros(n) #
+    emags = np.zeros(n) #
+    limmags = np.zeros(n) #
     
     status_ = np.ones(n) #
     
@@ -78,7 +85,7 @@ def get_forced_phot_maaxlike(name, targetdir, ra, dec,
         imgpath = imgfiles[i]
         psfpath = psffiles[i]
         pobj = ZTFphot(name, ra, dec, imgpath, psfpath, r_psf, 
-                       r_bkg_in, r_bkg_out, verbose)
+                       r_bkg_in, r_bkg_out, SNT, verbose)
         zp_[i] = pobj.zp
         ezp_[i] = pobj.e_zp
         seeing_[i] = pobj.seeing
@@ -117,10 +124,15 @@ def get_forced_phot_maaxlike(name, targetdir, ra, dec,
         Fmaxlike[i] = pobj.Fpsf
         eFmaxlike[i] = pobj.eFpsf
         chi2_reds[i] = pobj.chi2_red
-        
+        Fratios[i] = pobj.Fratio
+        eFratios[i] = pobj.eFratio
+        mags[i] = pobj.mag
+        emags[i] = pobj.mag_unc
+        limmags[i] = pobj.limmag
         
     print ('\n')
     
+
     ####################### save the results to a file ########################
     diffimgname = np.array([x.split('/')[-1]for x in imgfiles])
     psfimgname = np.array([x.split('/')[-1]for x in psffiles])
@@ -129,14 +141,26 @@ def get_forced_phot_maaxlike(name, targetdir, ra, dec,
             programid_, field_, ccdid_, qid_, filtercode_, 
             moonra_, moondec_, moonillf_, moonphas_, airmass_,
             nbads_, nbadbkgs_, bkgstd_,  bkgmed_, diffimgname, psfimgname,
-            Fmaxlike, eFmaxlike. chi2_reds]
+            Fmaxlike, eFmaxlike, chi2_reds, Fratios, eFratios, mags, emags, limmags]
     
     my_lc = Table(data,names=['jdobs','filter', 'seeing', 'gain', 'zp', 'ezp',
                               'programid', 'fieldid', 'ccdid', 'qid', 'filterid', 
                               'moonra', 'moondec', 'moonillf', 'moonphase', 'airmass',
                               'nbad', 'nbadbkg', 'bkgstd', 'bkgmed', 'diffimgname', 
-                              'psfimgname', 'Flux_maxlike', 'Flux_maxlike_unc', 'chi2_nu'])
+                              'psfimgname', 'Flux_maxlike', 'Flux_maxlike_unc', 'chi2_nu',
+                              'Fratio', 'Fratio_unc', 'mag', 'mag_unc', 'limmag'])
     
     mylc = my_lc[status_==1]
     print ('writing data to database')
     mylc.write(targetdir+'/lightcurves/force_phot_'+name+'_maxlikelihood_lc.fits', overwrite=True)
+    '''
+    mylc = mylc[mylc['mag']!=0]
+    mylc = mylc[mylc['mag']!=99]
+    
+    plt.errorbar(mylc['jdobs'], mylc['mag'], mylc['mag_unc'], fmt='.k')
+    
+    plt.xlim(2458480, 2458600)
+    '''
+    
+    
+    
