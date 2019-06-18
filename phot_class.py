@@ -379,7 +379,6 @@ class ZTFphot(object):
         x = pobj.x
         y = pobj.y
         yerrs = pobj.yerrs 
-        stampupsamplefac = pobj.stampupsamplefac
         '''
         x = self.x
         y = self.y
