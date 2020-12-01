@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jun 18 09:24:56 2019
@@ -114,7 +114,7 @@ def get_forced_phot_maaxlike(name, targetdir, ra, dec, SNT = 4,
             
         pobj.load_bkg_cutout()
         pobj.get_scr_cor_fn()  
-        pobj.fit_psf()
+        pobj.fit_psf(chi2=False)
         
         nbads_[i] = pobj.nbad
         nbadbkgs_[i] = pobj.nbad_bkg

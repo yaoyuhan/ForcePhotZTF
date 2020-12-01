@@ -172,5 +172,5 @@ def get_forced_phot_mcmc(name, targetdir, ncpu, verbose=False):
     info_df['Fratio'] = Fratio
     info_df['Fratio_unc'] = Fratio_unc
 
-    info_df.to_hdf(targetdir + 'lightcurves/{}_force_phot_nob.h5'.format(name), 'lc')
+    info_df.to_csv(targetdir + 'lightcurves/%s_force_phot_nob.csv'%name)
 

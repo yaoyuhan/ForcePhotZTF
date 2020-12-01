@@ -226,8 +226,9 @@ def download_marshal_lightcurve(name, targetdir):
     
     ###################### visualize marshal lightcurve #######################
     mtb = asci.read(targetdir+'lightcurves'+'/marshal_lc_'+name+'.csv')
-    ix = mtb['absmag']!=99
-    mtb = mtb[ix]
+    if 'absmag' in mtb.colnames:
+        ix = mtb['absmag']!=99
+        mtb = mtb[ix]
     
     ixr = mtb['filter']=='r'
     ixg = mtb['filter']=='g'

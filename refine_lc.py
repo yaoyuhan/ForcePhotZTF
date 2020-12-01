@@ -5,6 +5,9 @@ Created on Fri Dec 28 15:26:28 2018
 
 @author: yuhanyao
 """
+import sys
+sys.path.append("/Users/yuhanyao/Documents/")
+
 import requests
 import numpy as np
 import pandas as pd
@@ -75,8 +78,8 @@ def read_ipac_lc(name, targetdir):
     return tb
 
 
-def read_mcmc_lc(name, targetdir):
-    info_file = targetdir+'lightcurves/force_phot_{}_info_ref.fits'.format(name)
+def read_mcmc_lc(name, targetdir, suffix = '_info_ref.fits'):
+    info_file = targetdir+'lightcurves/force_phot_{}'.format(name)+suffix
     # xy_file = targetdir+'lightcurves/xydata_{}.fits'.format(name)
     
     info_tbl = Table.read(info_file)
@@ -84,7 +87,7 @@ def read_mcmc_lc(name, targetdir):
     info_df = info_tbl.to_pandas()
     # xy_df = xy_tbl.to_pandas()
 
-    mylc = pd.read_hdf(targetdir+'lightcurves/'+name+'_force_phot_nob.h5')
+    mylc = pd.read_csv(targetdir+'lightcurves/'+name+'_force_phot_nob.csv')
     mylc['jdref_start'] = info_df['jdref_start'].values
     mylc['jdref_end'] = info_df['jdref_end'].values
 
@@ -100,9 +103,8 @@ def read_mcmc_lc(name, targetdir):
     tb['Fratio'] = Fratio
     tb['Fratio_unc'] = eFratio
     
-    tb['diffimgname'] = [x.decode("utf-8") for x in tb['diffimgname'].values]
+    tb['diffimgname'] = [x[2:-1] for x in tb['diffimgname'].values]
     return tb
-    
     
 
 def plotlcs(tb, name, targetdir, seeing_cut = 7., show_refjds = True):
@@ -219,6 +221,14 @@ def get_recerence_jds(name, targetdir, only_partnership=False, retain_iband = Tr
             fltidnow = 'zg'
         elif filteridnow==2:
             fltidnow = 'zr'
+        elif filteridnow==3:
+            fltidnow = 'zi'
+        else:
+            print ("filteridnow = %s"%filteridnow)
+            ind = mylc['fcqf'] == fcqnow
+            jdref_start[ind] = np.nan
+            jdref_end[ind] = np.nan
+            continue
             
         # 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=824%20AND%20ccdid=15%20AND%20qid=1%20AND%20filtercode=%271%27&CT=csv' 
         url = 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=' +\
@@ -295,6 +305,8 @@ def get_recerence_jds_simple(filein, fileout, only_partnership=False, retain_iba
             fltidnow = 'zg'
         elif filteridnow==2:
             fltidnow = 'zr'
+        else:
+            fltidnow = 'zi'
             
         # 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=824%20AND%20ccdid=15%20AND%20qid=1%20AND%20filtercode=%271%27&CT=csv' 
         url = 'https://irsa.ipac.caltech.edu/ibe/search/ztf/products/ref?WHERE=field=' +\

@@ -6,6 +6,7 @@ Created on Wed Nov 21 12:36:23 2018
 @author: Yuhan Yao
 """
 import numpy as np
+import scipy.optimize as op
 import matplotlib
 import matplotlib.pyplot as plt
 
@@ -21,6 +22,20 @@ from photutils import CircularAnnulus
 #from image_registration import chi2_shift_iterzoom#, chi2_shift
 
 # ref: https://github.com/Caltech-IPAC/ztf/blob/master/src/pl/perl/forcedphotometry.pl
+
+
+def systematic_lnlike(theta, x, y, sigma_y):
+    m, lnsig_0 = theta
+    model = m * x
+    sig_0 = np.exp(lnsig_0)
+    
+    chi2_term = -1/2*np.sum((y - model)**2/(sigma_y**2 + sig_0**2))
+    error_term = np.sum(np.log(1/np.sqrt(2*np.pi*(sigma_y**2 + sig_0**2))))
+    ln_l = chi2_term + error_term
+    return ln_l
+
+
+systematic_nll = lambda *args: -systematic_lnlike(*args)
 
 
 def mylinear_fit(x, y, yerr, npar = 2):
@@ -54,6 +69,20 @@ def mylinear_fit(x, y, yerr, npar = 2):
     # y_mean = np.mean(y)
     # pearson_r = np.sum( (x - x_mean) * (y - y_mean) ) / np.sqrt(np.sum( (x - x_mean)**2 )) / np.sqrt(np.sum( (y - y_mean)**2 ))
     return Fpsf, e_Fpsf, a
+
+
+def maxlike_fit(x, y, yerr):
+    arg = np.argsort(x)
+    x = x[arg]
+    y = y[arg]
+    yerr = yerr[arg]
+    # plt.errorbar(x, y, yerr, fmt='.k')
+    result = op.minimize(systematic_nll, [0, 1],
+                         method='Powell', args=(x, y, yerr))
+    m_ml, lnsig0_ml = result["x"]
+    errors = result.hess_inv
+    return m_ml, errors[0][0]
+
 
 
 class ZTFphot(object):
@@ -375,7 +404,7 @@ class ZTFphot(object):
         self.x = psf_fn[~bad_mask]
     
         
-    def fit_psf(self):
+    def fit_psf(self, chi2=True):
         '''
         x = pobj.x
         y = pobj.y
@@ -386,7 +415,10 @@ class ZTFphot(object):
         yerrs = self.yerrs 
         
         # one-parameter fit 
-        Fpsf, eFpsf, apsf = mylinear_fit(x, y, yerrs, npar = 1)
+        if chi2==True:
+            Fpsf, eFpsf, apsf = mylinear_fit(x, y, yerrs, npar = 1)
+        else:
+            Fpsf, eFpsf = maxlike_fit(x, y, yerrs)
         '''
         plt.errorbar(x, y, yerrs, fmt='.k')
         plt.plot(x, Fpsf*x, 'r-')
